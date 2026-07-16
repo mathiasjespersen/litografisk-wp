@@ -1,0 +1,50 @@
+//$easing: ease-in-out;
+$easing: cubic-bezier(0.73, 0.26, 0.21, 0.99);
+@mixin transition($duration: 1s, $property: all, $delay: 0s) {
+	-webkit-transition-property: $property;
+  -webkit-transition-duration: $duration;
+  -webkit-transition-timing-function: $easing;
+  -webkit-transition-delay: $delay;
+	-moz-transition-property: $property;
+	-moz-transition-duration: $duration;
+  -moz-transition-timing-function: $easing;
+  -moz-transition-delay: $delay;
+	-o-transition-property: $property;
+  -o-transition-duration: $duration;
+  -o-transition-timing-function: $easing;
+  -o-transition-delay: $delay;
+	transition-property: $property;
+  transition-duration: $duration;
+  transition-timing-function: $easing;
+  transition-delay: $delay;
+}
+
+@mixin columns($column-count: 2, $column-gap: $unit) {
+  -webkit-column-count: $column-count;
+  -webkit-column-gap: $column-gap;
+  -moz-column-count: $column-count;
+  -moz-column-gap: $column-gap;
+  column-count: $column-count;
+  column-gap: $column-gap;
+}
+
+@mixin move($x: 0, $y: 0) {
+  -webkit-transform: translate($x, $y);
+  -moz-transform: translate($x, $y);
+  -o-transform: translate($x, $y);
+  transform: translate($x, $y);
+}
+
+@mixin rotate($deg) {
+  -moz-transform: rotate($deg);
+  -o-transform: rotate($deg);
+  -webkit-transform: rotate($deg);
+  transform: rotate($deg);
+}
+
+@mixin scale($size) {
+  -webkit-transform: scale($size);
+  -moz-transform: scale($size);
+  -o-transform: scale($size);
+  transform: scale($size);
+}

@@ -1,0 +1,10 @@
+/* #cpt_info_box {display: none;} */
+
+.hide-label .acf-label {
+	display: none;
+}
+
+/* Admin istings */
+th#featured_thumb {
+	width: 43px;
+}
