@@ -1,25 +1,26 @@
 <?php
 
 if (!defined('ABSPATH')) exit;
-if (!class_exists('BVCallbackBase')) :
+if (!class_exists('MCCallbackBase')) :
 
-class BVCallbackBase {
+class MCCallbackBase {
 
-	public static $wing_infos = array("MANAGE_WING_VERSION" => '1.6',
+	public static $wing_infos = array("MANAGE_WING_VERSION" => '2.0',
 		"ACTLOG_WING_VERSION" => '1.0',
 		"DYNSYNC_WING_VERSION" => '1.0',
 		"UPGRADER_WING_VERSION" => '1.1',
 		"BRAND_WING_VERSION" => '1.1',
 		"DB_WING_VERSION" => '1.3',
 		"ACCOUNT_WING_VERSION" => '1.2',
-		"MISC_WING_VERSION" => '1.2',
-		"FS_WING_VERSION" => '1.2',
-		"INFO_WING_VERSION" => '2.0',
-		"WATCH_WING_VERSION" => '1.3',
-		"FS_WRITE_WING_VERSION" => '1.0',
+		"MISC_WING_VERSION" => '1.4',
+		"FS_WING_VERSION" => '1.4',
+		"INFO_WING_VERSION" => '2.7',
+		"WATCH_WING_VERSION" => '1.6',
+		"FS_WRITE_WING_VERSION" => '1.2',
+		"FS_WRITE_WING_VERSION" => '1.2',
 		"IPSTORE_WING_VERSION" => '1.4',
-		"PROTECT_WING_VERSION" => '1.2',
-		"SECURITY_WING_VERSION" => '1.0',
+		"PROTECT_WING_VERSION" => '1.3',
+		"SECURITY_WING_VERSION" => '1.3',
 		);
 
 	public function objectToArray($obj) {

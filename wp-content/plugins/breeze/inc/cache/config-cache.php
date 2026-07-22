@@ -18,22 +18,36 @@
  *  along with this program; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
-//Based on some work of simple-cache
+// Based on some work of simple-cache
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
 class Breeze_ConfigCache {
+	/**
+	 * Invalidate OPcache entry for a file so config updates are visible immediately.
+	 *
+	 * @param string $file Absolute file path.
+	 *
+	 * @return void
+	 */
+	private static function invalidate_opcode_cache_file( $file ) {
+		if ( empty( $file ) || ! is_string( $file ) ) {
+			return;
+		}
+
+		clearstatcache( true, $file );
+
+		if ( function_exists( 'opcache_invalidate' ) ) {
+			opcache_invalidate( $file, true );
+		}
+	}
 
 	/**
 	 * Create advanced-cache file
 	 */
 	public function write() {
-		global $wp_filesystem;
-		if ( empty( $wp_filesystem ) ) {
-			require_once( ABSPATH . '/wp-admin/includes/file.php' );
-			WP_Filesystem();
-		}
+		$wp_filesystem = breeze_get_filesystem();
 
 		$file = trailingslashit( WP_CONTENT_DIR ) . '/advanced-cache.php';
 
@@ -42,34 +56,37 @@ class Breeze_ConfigCache {
 			'breeze-config' => array(),
 		);
 		if ( is_multisite() ) {
-			// This is a multisite install, loop through all subsites.
+			/**
+			 * This is a multisite install, loop through all subsites.
+			 * Use the given filter to define the number of subsites
+			 * to fetch default is 100.
+			 */
 			$blogs = get_sites(
 				array(
 					'fields' => 'ids',
+					'number' => apply_filters( 'breeze_subsites_fetch_count_modify', 0 ),
 				)
 			);
 
 			foreach ( $blogs as $blog_id ) {
 				switch_to_blog( $blog_id );
 
-				//if ( ! empty( Breeze_Options_Reader::get_option_value( 'breeze-active' ) ) ) {
-					$inherit_option = get_blog_option( $blog_id, 'breeze_inherit_settings', '0' );
-					$inherit_option = filter_var( $inherit_option, FILTER_VALIDATE_BOOLEAN );
-					if ( false === $inherit_option ) {
-						// Site uses own (custom) configuration.
-						$cache_configs["breeze-config-{$blog_id}"] = preg_replace( '(^https?://)', '', site_url() );
-					} else {
-						// Site uses global configuration.
-						$cache_configs['breeze-config'][ $blog_id ] = preg_replace( '(^https?://)', '', site_url() );
-					}
-				//}
+				// if ( ! empty( Breeze_Options_Reader::get_option_value( 'breeze-active' ) ) ) {
+				$inherit_option = get_blog_option( $blog_id, 'breeze_inherit_settings', '0' );
+				$inherit_option = filter_var( $inherit_option, FILTER_VALIDATE_BOOLEAN );
+				if ( false === $inherit_option ) {
+					// Site uses own (custom) configuration.
+					$cache_configs[ "breeze-config-{$blog_id}" ] = preg_replace( '(^https?://)', '', site_url() );
+				} else {
+					// Site uses global configuration.
+					$cache_configs['breeze-config'][ $blog_id ] = preg_replace( '(^https?://)', '', site_url() );
+				}
+				// }
 				restore_current_blog();
 			}
-		} else {
+		} elseif ( ! empty( Breeze_Options_Reader::get_option_value( 'breeze-active' ) ) ) {
 
-			if ( ! empty( Breeze_Options_Reader::get_option_value( 'breeze-active' ) ) ) {
 				$cache_configs['breeze-config'][] = preg_replace( '(^https?://)', '', site_url() );
-			}
 		}
 
 		if ( empty( $cache_configs ) || ( 1 === count( $cache_configs ) && empty( $cache_configs['breeze-config'] ) ) ) {
@@ -79,30 +96,45 @@ class Breeze_ConfigCache {
 			return;
 		} else {
 			$file_string = '<?php ' .
-			               "\n\r" . 'defined( \'ABSPATH\' ) || exit;' .
-			               "\n\r" . 'define( \'BREEZE_ADVANCED_CACHE\', true );' .
-			               "\n\r" . 'if ( is_admin() ) { return; }' .
-			               "\n\r" . 'if ( ! @file_exists( \'' . BREEZE_PLUGIN_DIR . 'breeze.php\' ) ) { return; }';
+							"\n\r" . 'defined( \'ABSPATH\' ) || exit;' .
+							"\n\r" . 'define( \'BREEZE_ADVANCED_CACHE\', true );' .
+							"\n\r" . 'if ( is_admin() ) { return; }' .
+							"\n\r" . 'if ( ! @file_exists( \'' . BREEZE_PLUGIN_DIR . 'breeze.php\' ) ) { return; }';
 		}
 
-		if ( 1 === count( $cache_configs ) ) {
+		if ( ! is_multisite() && 1 === count( $cache_configs ) ) {
 			// Only 1 config file available.
-			$blog_file   = trailingslashit( WP_CONTENT_DIR ) . 'breeze-config/breeze-config.php';
+			$blog_file    = trailingslashit( WP_CONTENT_DIR ) . 'breeze-config/breeze-config.php';
 			$file_string .= "\n\$config['config_path'] = '$blog_file';";
 		} else {
 			// Multiple configuration files, load appropriate one by comparing URLs.
 			$file_string .= "\n\r" . '$domain = strtolower( stripslashes( $_SERVER[\'HTTP_HOST\'] ) );' .
-			                "\n" . 'if ( substr( $domain, -3 ) == \':80\' ) {' .
-			                "\n" . '	$domain = substr( $domain, 0, -3 );' .
-			                "\n" . '} elseif ( substr( $domain, -4 ) == \':443\' ) {' .
-			                "\n" . '	$domain = substr( $domain, 0, -4 );' .
-			                "\n" . '}';
+							"\n" . 'if ( substr( $domain, -3 ) == \':80\' ) {' .
+							"\n" . '	$domain = substr( $domain, 0, -3 );' .
+							"\n" . '} elseif ( substr( $domain, -4 ) == \':443\' ) {' .
+							"\n" . '	$domain = substr( $domain, 0, -4 );' .
+							"\n" . '}';
 			if ( is_subdomain_install() ) {
 				$file_string .= "\n" . '$site_url = $domain;';
 			} else {
-				$file_string .= "\n" . 'list( $path ) = explode( \'?\', stripslashes( $_SERVER[\'REQUEST_URI\'] ) );' .
-				                "\n" . '$path_parts = explode( \'/\', rtrim( $path, \'/\' ) );' .
-				                "\n" . '$site_url = $domain . ( ! empty( $path_parts[1] ) ? \'/\' . $path_parts[1] : \'\' );';
+				$file_string .= <<<'FILE_STRING'
+
+function breeze_get_current_url_formatted() {
+	$domain = strtolower( stripslashes( $_SERVER['HTTP_HOST'] ) );
+	if ( substr( $domain, -3 ) == ':80' ) {
+		$domain = substr( $domain, 0, -3 );
+	} elseif ( substr( $domain, -4 ) == ':443' ) {
+		$domain = substr( $domain, 0, -4 );
+	}
+	$request_uri = stripslashes( $_SERVER['REQUEST_URI'] );
+	$path        = explode( '?', $request_uri, 2 )[0];
+	$full_url    = '//' . $domain . $path;
+	return rtrim( $full_url, '/' );
+}
+$site_url = breeze_get_current_url_formatted();
+
+FILE_STRING;
+
 			}
 
 			// Create conditional blocks for each site.
@@ -129,22 +161,71 @@ class Breeze_ConfigCache {
 							if ( isset( $e[2] ) ) {
 								$the_blog_id = (int) $e[2];
 							}
-
 						}
 
 						$define_blog_identity = "\n\t\t\$config['blog_id']={$the_blog_id};";
-						$file_string          .= "\n\t\t\$config['config_path'] = '$blog_file';" . $define_blog_identity . "\n\t\tbreak;";
+						$file_string         .= "\n\t\t\$config['config_path'] = '$blog_file';" . $define_blog_identity . "\n\t\tbreak;";
 					} else {
 						$file_string .= "\n\t\t\$config['config_path'] = '$blog_file';" . "\n\t\tbreak;";
 					}
-
 				}
 			}
 
 			$file_string .= "\n\t}";
 			$file_string .= "\n\t" . 'return $config;';
 			$file_string .= "\n}";
-			$file_string .= "\n" . '$config = breeze_fetch_configuration_data( $site_url );';
+			$file_string .= <<<'FILE_STRING'
+
+function breeze_get_subsite_from_url( $url ) {
+	$parsed_url    = parse_url( $url );
+	$domain        = strtolower( $parsed_url['host'] );
+	$path          = trim( $parsed_url['path'] ?? '', '/' );
+	$path_segments = array();
+	if ( ! empty( $path ) ) {
+		$path_segments = explode( '/', $path );
+	}
+	if ( ':80' === substr( $domain, -3 ) ) {
+		$domain = substr( $domain, 0, -3 );
+	} elseif ( ':443' === substr( $domain, -4 ) ) {
+		$domain = substr( $domain, 0, -4 );
+	}
+	$site_url = '';
+	if ( count( $path_segments ) >= 2 ) {
+		$site_url       = $domain . '/' . $path_segments[0] . '/' . $path_segments[1];
+		$subsite_config = breeze_fetch_configuration_data( $site_url );
+
+		if ( $subsite_config ) {
+			return $subsite_config;
+		}
+	}
+	if ( count( $path_segments ) >= 1 ) {
+		$site_url       = $domain . '/' . $path_segments[0];
+		$subsite_config = breeze_fetch_configuration_data( $site_url );
+		if ( $subsite_config ) {
+			return $subsite_config;
+		}
+	}
+	$site_url       = $domain;
+	$subsite_config = breeze_fetch_configuration_data( $site_url );
+	if ( $subsite_config ) {
+		return $subsite_config;
+	}
+
+	return '';
+}
+
+FILE_STRING;
+
+			if ( is_subdomain_install() ) {
+				$file_string .= "\n" . '$config = breeze_fetch_configuration_data( $site_url );';
+			} else {
+				$file_string .= <<<'FILE_STRING'
+
+$config = breeze_get_subsite_from_url( $site_url );
+				
+FILE_STRING;
+			}
+
 			$file_string .= "\n" . 'if ( ';
 			$file_string .= "\n" . ' empty( $config ) && ';
 			$file_string .= "\n" . ' false === filter_var( SUBDOMAIN_INSTALL, FILTER_VALIDATE_BOOLEAN ) && ';
@@ -161,15 +242,23 @@ class Breeze_ConfigCache {
 		}
 
 		$file_string .= "\nif ( empty( \$config ) || ! isset( \$config['config_path'] ) || ! @file_exists( \$config['config_path'] ) ) { return; }" .
-		                "\n\$breeze_temp_config = include \$config['config_path'];" .
-		                "\nif ( isset( \$config['blog_id'] ) ) { \$breeze_temp_config['blog_id'] = \$config['blog_id']; }" .
-		                "\n\$GLOBALS['breeze_config'] = \$breeze_temp_config; unset( \$breeze_temp_config );" .
-		                "\n" . 'if ( empty( $GLOBALS[\'breeze_config\'] ) || empty( $GLOBALS[\'breeze_config\'][\'cache_options\'][\'breeze-active\'] ) ) { return; }' .
-		                "\n" . 'if ( @file_exists( \'' . BREEZE_PLUGIN_DIR . 'inc/cache/execute-cache.php\' ) ) {' .
-		                "\n" . '	include_once \'' . BREEZE_PLUGIN_DIR . 'inc/cache/execute-cache.php\';' .
-		                "\n" . '}' . "\n";
+						"\n\$breeze_temp_config = include \$config['config_path'];" .
+						"\nif ( isset( \$config['blog_id'] ) ) { \$breeze_temp_config['blog_id'] = \$config['blog_id']; }" .
+						"\n\$GLOBALS['breeze_config'] = \$breeze_temp_config; unset( \$breeze_temp_config );" .
+						"\n" . 'if ( empty( $GLOBALS[\'breeze_config\'] ) || empty( $GLOBALS[\'breeze_config\'][\'cache_options\'][\'breeze-active\'] ) ) { return; }' .
+						"\n" . 'if ( @file_exists( \'' . BREEZE_PLUGIN_DIR . 'inc/cache/execute-cache.php\' ) ) {' .
+						"\n" . '	include_once \'' . BREEZE_PLUGIN_DIR . 'inc/cache/execute-cache.php\';' .
+						"\n" . '	if ( class_exists( \'\Breeze\Cache\Execute_Cache\' ) ) {' .
+						"\n" . '		\Breeze\Cache\Execute_Cache::bootstrap();' .
+						"\n" . '		}' .
+						"\n" . '}' . "\n";
 
-		return $wp_filesystem->put_contents( $file, $file_string );
+		$result = $wp_filesystem->put_contents( $file, $file_string );
+		if ( $result ) {
+			self::invalidate_opcode_cache_file( $file );
+		}
+
+		return $result;
 	}
 
 	/**
@@ -178,11 +267,11 @@ class Breeze_ConfigCache {
 	 * @param bool $create_root_config Used in multisite, to reset/create breeze-config.php file
 	 */
 	public static function write_config_cache( $create_root_config = false ) {
-
+		global $wmc_settings;
 		if ( true === $create_root_config ) {
-			$network_id   = get_current_network_id();
-			$settings     = Breeze_Options_Reader::fetch_all_saved_settings(true);
-			#$settings     = get_network_option( $network_id, 'breeze_basic_settings' );
+			$network_id = get_current_network_id();
+			$settings   = Breeze_Options_Reader::fetch_all_saved_settings( true );
+			// $settings     = get_network_option( $network_id, 'breeze_basic_settings' );
 			$homepage_url = network_site_url();
 		} else {
 			$settings     = Breeze_Options_Reader::fetch_all_saved_settings();
@@ -204,14 +293,51 @@ class Breeze_ConfigCache {
 
 		$storage['wp-user-roles'] = breeze_all_wp_user_roles();
 
-		$lazy_load        = Breeze_Options_Reader::get_option_value( 'breeze-lazy-load', false, $create_root_config );
-		$lazy_load_native = Breeze_Options_Reader::get_option_value( 'breeze-lazy-load-native', false, $create_root_config );
-		$preload_links    = Breeze_Options_Reader::get_option_value( 'breeze-preload-links', false, $create_root_config );
+		$lazy_load         = Breeze_Options_Reader::get_option_value( 'breeze-lazy-load', false, $create_root_config );
+		$lazy_load_native  = Breeze_Options_Reader::get_option_value( 'breeze-lazy-load-native', false, $create_root_config );
+		$preload_links     = Breeze_Options_Reader::get_option_value( 'breeze-preload-links', false, $create_root_config );
+		$lazy_load_iframes = Breeze_Options_Reader::get_option_value( 'breeze-lazy-load-iframes', false, $create_root_config );
+		$lazy_load_videos  = Breeze_Options_Reader::get_option_value( 'breeze-lazy-load-videos', false, $create_root_config );
 
-		$storage['enabled-lazy-load']    = ( isset( $lazy_load ) ? $lazy_load : 0 );
-		$storage['use-lazy-load-native'] = ( isset( $lazy_load_native ) ? $lazy_load_native : 0 );
-		$storage['breeze-preload-links'] = ( isset( $preload_links ) ? $preload_links : 0 );
+		$storage['enabled-lazy-load']        = ( isset( $lazy_load ) ? $lazy_load : 0 );
+		$storage['use-lazy-load-native']     = ( isset( $lazy_load_native ) ? $lazy_load_native : 0 );
+		$storage['breeze-preload-links']     = ( isset( $preload_links ) ? $preload_links : 0 );
+		$storage['breeze-lazy-load-iframes'] = ( isset( $lazy_load_iframes ) ? $lazy_load_iframes : 0 );
+		$storage['breeze-lazy-load-videos']  = ( isset( $lazy_load_videos ) ? $lazy_load_videos : 0 );
 
+		// CURCY - WooCommerce Multi Currency Premium.
+		if (
+			class_exists( 'WOOMULTI_CURRENCY' ) ||
+			class_exists( 'WOOMULTI_CURRENCY_F' )
+		) {
+			if ( empty( $wmc_settings ) ) {
+				// if $wmc_settings is empty, we will check again.
+				$wmc_settings = get_option( 'woo_multi_currency_params', array() );
+			}
+			// if the option exists and has values.
+			if ( ! empty( $wmc_settings ) ) {
+				$is_enable = filter_var( $wmc_settings['enable'], FILTER_VALIDATE_BOOLEAN );
+				if ( $is_enable ) {
+					$session_type = 'cookie';
+					$is_session   = false;
+					if ( isset( $wmc_settings['use_session'] ) ) {
+						$is_session = filter_var( $wmc_settings['use_session'], FILTER_VALIDATE_BOOLEAN );
+					}
+					if ( $is_session ) {
+						$session_type = 'session';
+					}
+					$storage['curcy-wmc-type'] = $session_type;
+				}
+			}
+		}
+
+		// WOOCS - WooCommerce Currency Switcher
+		$woocs_is_active = false;
+		if (
+			class_exists( 'WOOCS_STARTER' )
+		) {
+			$woocs_is_active = true;
+		}
 
 		if ( isset( $_POST['woocommerce_default_customer_address'] ) ) {
 			$storage['woocommerce_geolocation_ajax'] = ( 'geolocation_ajax' === $_POST['woocommerce_default_customer_address'] ) ? 1 : 0;
@@ -222,10 +348,14 @@ class Breeze_ConfigCache {
 		// permalink_structure
 		if ( is_multisite() ) {
 			if ( is_network_admin() ) {
+				if ( true === $woocs_is_active ) {
+					$storage['woocs-store-type'] = get_site_option( 'woocs_storage', 'transient' );
+				}
+
 				unset( $storage['woocommerce_geolocation_ajax'] );
 				// network oes not have this setting.
 				// we save for each sub-site.
-				$blogs = get_sites();
+				$blogs = get_sites( array( 'number' => 0 ) );
 				if ( ! empty( $blogs ) ) {
 					foreach ( $blogs as $blog_data ) {
 						$blog_id = $blog_data->blog_id;
@@ -240,14 +370,27 @@ class Breeze_ConfigCache {
 			} else {
 				$network_id                     = get_current_blog_id();
 				$storage['permalink_structure'] = get_blog_option( $network_id, 'permalink_structure', '' );
+				if ( true === $woocs_is_active ) {
+					$storage['woocs-store-type'] = get_blog_option( $network_id, 'woocs_storage', 'transient' );
+				}
 			}
 		} else {
 			$storage['permalink_structure'] = get_option( 'permalink_structure', '' );
+			if ( true === $woocs_is_active ) {
+				$storage['woocs-store-type'] = get_option( 'woocs_storage', 'transient' );
+			}
 		}
-
 
 		if ( class_exists( 'WooCommerce' ) ) {
 			$ecommerce_exclude_urls = Breeze_Ecommerce_Cache::factory()->ecommerce_exclude_pages();
+		}
+
+		if ( class_exists( 'BuddyPress' ) ) {
+			$exclude_buddyboss_pages = Breeze_Ecommerce_Cache::factory()->buddyboss_exclude_urls();
+
+			if ( ! empty( $exclude_buddyboss_pages ) ) {
+				$ecommerce_exclude_urls = array_merge( $exclude_buddyboss_pages, $ecommerce_exclude_urls );
+			}
 		}
 
 		if ( function_exists( 'EDD' ) ) {
@@ -273,6 +416,20 @@ class Breeze_ConfigCache {
 
 			if ( ! empty( $exclude_give_pages ) ) {
 				$ecommerce_exclude_urls = array_merge( $exclude_give_pages, $ecommerce_exclude_urls );
+			}
+		}
+
+		/**
+		 * Foo Events.
+		 */
+		if ( class_exists( 'FooEventsPOS' ) ) {
+			$pos_page_slug = FooEvents_POS_Integration::fooeventspos_get_app_slug();
+
+			$exclude_foo_events_give_pages = Breeze_Ecommerce_Cache::factory()->exclude_fooevents_pos_pages();
+
+			if ( ! empty( $exclude_foo_events_give_pages ) ) {
+				$ecommerce_exclude_urls   = array_merge( $exclude_foo_events_give_pages, $ecommerce_exclude_urls );
+				$ecommerce_exclude_urls[] = '/' . $pos_page_slug . '/*';
 			}
 		}
 
@@ -384,6 +541,46 @@ class Breeze_ConfigCache {
 			}
 		}
 
+		$the_headers = breeze_helper_fetch_headers();
+
+		$allowed_headers = apply_filters(
+			'breeze_custom_headers_allow',
+			array(
+				'content-security-policy',
+				'x-frame-options',
+				'referrer-policy',
+				'strict-transport-security',
+				'X-Content-Type-Options',
+				'Access-Control-Allow-Origin',
+				'Cross-Origin-Opener-Policy',
+				'Cross-Origin-Embedder-Policy',
+				'Cross-Origin-Resource-Policy',
+				'Permissions-Policy',
+				'X-XSS-Protection',
+			)
+		);
+
+		if ( is_array( $the_headers ) && ! empty( $the_headers ) ) {
+			$to_save_headers = array();
+
+			foreach ( $allowed_headers as $header_name ) {
+
+				$header_name = strtolower( $header_name );
+
+				if ( array_key_exists( $header_name, $the_headers ) ) {
+
+					if ( is_array( $the_headers[ $header_name ] ) ) {
+						$to_save_headers[ $header_name ] = $the_headers[ $header_name ][0];
+					} else {
+						$to_save_headers[ $header_name ] = $the_headers[ $header_name ];
+					}
+				}
+			}
+			if ( ! empty( $to_save_headers ) ) {
+				$storage['breeze_custom_headers'] = $to_save_headers;
+			}
+		}
+
 		return self::write_config( $storage, $create_root_config );
 	}
 
@@ -391,15 +588,10 @@ class Breeze_ConfigCache {
 	 * Create file config storage parameter used for cache.
 	 *
 	 * @param array $config Options array.
-	 * @param bool $create_root_config Used in multisite, to reset/create breeze-config.php file
+	 * @param bool  $create_root_config Used in multisite, to reset/create breeze-config.php file
 	 */
 	public static function write_config( $config, $create_root_config = false ) {
-		global $wp_filesystem;
-
-		if ( empty( $wp_filesystem ) ) {
-			require_once( ABSPATH . '/wp-admin/includes/file.php' );
-			WP_Filesystem();
-		}
+		$wp_filesystem = breeze_get_filesystem();
 
 		$config_dir = trailingslashit( WP_CONTENT_DIR ) . 'breeze-config';
 		$filename   = 'breeze-config';
@@ -411,11 +603,12 @@ class Breeze_ConfigCache {
 
 		if ( is_multisite() && ! is_network_admin() && breeze_does_inherit_settings() ) {
 			// Site inherits network-level setting, do not create separate configuration file and remove existing configuration file.
-			if ( $wp_filesystem->exists( $config_file ) ) {
-				$wp_filesystem->delete( $config_file, true );
-			}
 
 			if ( false === $create_root_config ) {
+                if ( $wp_filesystem->exists( $config_file ) ) {
+                    $wp_filesystem->delete( $config_file, true );
+                }
+
 				return;
 			}
 		}
@@ -424,7 +617,12 @@ class Breeze_ConfigCache {
 
 		$config_file_string = '<?php ' . "\n\r" . "defined( 'ABSPATH' ) || exit;" . "\n\r" . 'return ' . var_export( $config, true ) . '; ' . "\n\r";
 
-		return $wp_filesystem->put_contents( $config_file, $config_file_string );
+		$result = $wp_filesystem->put_contents( $config_file, $config_file_string, FS_CHMOD_FILE );
+		if ( $result ) {
+			self::invalidate_opcode_cache_file( $config_file );
+		}
+
+		return $result;
 	}
 
 	/**
@@ -436,7 +634,7 @@ class Breeze_ConfigCache {
 	 */
 	public function toggle_caching( $status ) {
 		$allow_cache_toggle = true;
-		if ( is_multisite() && ! is_network_admin() ) {
+		if ( 'cli' !== php_sapi_name() && ( is_multisite() && ! is_network_admin() ) ) {
 			$allow_cache_toggle = false;
 		}
 
@@ -444,7 +642,7 @@ class Breeze_ConfigCache {
 			return false;
 		}
 
-		global $wp_filesystem;
+		$wp_filesystem = breeze_get_filesystem();
 		if ( defined( 'WP_CACHE' ) && WP_CACHE === $status ) {
 			return;
 		}
@@ -455,7 +653,7 @@ class Breeze_ConfigCache {
 		$file        = '/wp-config.php';
 		$config_path = false;
 
-		for ( $i = 1; $i <= 3; $i ++ ) {
+		for ( $i = 1; $i <= 3; $i++ ) {
 			if ( $i > 1 ) {
 				$file = '/..' . $file;
 			}
@@ -520,7 +718,7 @@ class Breeze_ConfigCache {
 	 */
 	public function clean_up() {
 
-		global $wp_filesystem;
+		$wp_filesystem = breeze_get_filesystem();
 		$file = untrailingslashit( WP_CONTENT_DIR ) . '/advanced-cache.php';
 
 		$ret = true;
@@ -551,7 +749,7 @@ class Breeze_ConfigCache {
 	 */
 	public function clean_config() {
 
-		global $wp_filesystem;
+		$wp_filesystem = breeze_get_filesystem();
 
 		$folder = untrailingslashit( WP_CONTENT_DIR ) . '/breeze-config';
 

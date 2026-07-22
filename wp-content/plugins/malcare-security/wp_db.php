@@ -1,5 +1,5 @@
 <?php
-
+// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared
 if (!defined('ABSPATH')) exit;
 if (!class_exists('MCWPDb')) :
 
@@ -40,6 +40,21 @@ class MCWPDb {
 		return $wpdb->get_col($query, $col);
 	}
 
+	public function getLastRowId($col_name, $table_name) {
+		$query = "SELECT MAX($col_name) AS last_id FROM $table_name";
+		$results = $this->getResult($query);
+		if (empty($results) || !is_array($results) || !is_array($results[0]) ||
+				!array_key_exists("last_id", $results[0])) {
+			return null;
+		}
+		$last_id = $results[0]['last_id'];
+		if ($last_id === null) {
+			return 0;
+		} else if (is_numeric($last_id) === true) {
+			return (int) $last_id;
+		}
+	}
+
 	public function tableName($table) {
 		return $table[0];
 	}
@@ -70,7 +85,7 @@ class MCWPDb {
 	public function describeTable($table) {
 		return $this->getResult("DESCRIBE $table;");
 	}
-	
+
 	public function showTableIndex($table) {
 		return $this->getResult("SHOW INDEX FROM $table");
 	}
@@ -97,7 +112,7 @@ class MCWPDb {
 		if (!$this->isTablePresent($table)) {
 			if ($usedbdelta) {
 				if (!function_exists('dbDelta'))
-					require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
+					require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
 				dbDelta($query);
 			} else {
 				$this->query($query);
@@ -166,7 +181,7 @@ class MCWPDb {
 			return false;
 		}
 	}
-	
+
 	public function deleteBVTableContent($name, $filter = "") {
 		$table = $this->getBVTable($name);
 		if ($this->isTablePresent($table)) {
@@ -214,7 +229,13 @@ class MCWPDb {
 		$table = $this->getBVTable($name);
 		return $wpdb->replace($table, $value);
 	}
-	
+
+	public function insertIntoBVTable($name, $value) {
+		global $wpdb;
+		$table = $this->getBVTable($name);
+		return $wpdb->insert($table, $value);
+	}
+
 	public function tinfo($name) {
 		$result = array();
 		$table = $this->getBVTable($name);

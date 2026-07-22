@@ -12,9 +12,11 @@
 
 namespace Smush\Core\Integrations;
 
+use Smush\Core\CDN\CDN_Helper;
 use Smush\Core\Helper;
-use Smush\Core\Modules\Helpers\Parser;
 use Smush\Core\Modules\Smush;
+use Smush\Core\Optimizer;
+use Smush\Core\Parser\Parser;
 use WP_Smush;
 
 if ( ! defined( 'WPINC' ) ) {
@@ -27,6 +29,7 @@ if ( ! defined( 'WPINC' ) ) {
  * @since 2.8.0
  */
 class Common {
+	private $cdn_helper;
 
 	/**
 	 * Common constructor.
@@ -51,23 +54,14 @@ class Common {
 		// ReCaptcha lazy load.
 		add_filter( 'smush_skip_iframe_from_lazy_load', array( $this, 'exclude_recaptcha_iframe' ), 10, 2 );
 
-		// Compatibility modules for lazy loading.
-		add_filter( 'smush_skip_image_from_lazy_load', array( $this, 'lazy_load_compat' ), 10, 3 );
-
 		// Soliloquy slider CDN support.
 		add_filter( 'soliloquy_image_src', array( $this, 'soliloquy_image_src' ) );
 
 		// Translate Press integration.
 		add_filter( 'smush_skip_image_from_lazy_load', array( $this, 'trp_translation_editor' ) );
 
-		// Jetpack CDN compatibility.
-		add_filter( 'smush_cdn_skip_image', array( $this, 'jetpack_cdn_compat' ), 10, 2 );
-
 		// WP Maintenance Plugin integration.
 		add_action( 'template_redirect', array( $this, 'wp_maintenance_mode' ) );
-
-		// WooCommerce's product gallery thumbnail CDN support.
-		add_filter( 'woocommerce_single_product_image_thumbnail_html', array( $this, 'woocommerce_cdn_gallery_thumbnails' ) );
 
 		// Buddyboss theme and its platform plugin integration.
 		add_filter( 'wp_smush_cdn_before_process_src', array( $this, 'buddyboss_platform_modify_image_src' ), 10, 2 );
@@ -77,6 +71,9 @@ class Common {
 
 		// Thumbnail regeneration handler.
 		add_filter( 'wp_generate_attachment_metadata', array( $this, 'maybe_handle_thumbnail_generation' ) );
+		$this->cdn_helper = CDN_Helper::get_instance();
+
+		add_filter( 'wp_smush_should_transform_page', array( $this, 'should_transform_page' ) );
 	}
 
 	/**
@@ -154,8 +151,6 @@ class Common {
 	 * @param string $image_size   Image size.
 	 */
 	public function smush_retina_image( $id, $retina_file, $image_size ) {
-		$smush = WP_Smush::get_instance()->core()->mod->smush;
-
 		/**
 		 * Allows to Enable/Disable WP Retina 2x Integration
 		 */
@@ -171,7 +166,8 @@ class Common {
 		}
 
 		// Do not smush if auto smush is turned off.
-		if ( ! $smush->is_auto_smush_enabled() ) {
+		$optimizer = Optimizer::get_instance();
+		if ( ! $optimizer->should_auto_optimize( $id ) ) {
 			return;
 		}
 
@@ -191,7 +187,8 @@ class Common {
 			return;
 		}
 
-		$stats = $smush->do_smushit( $retina_file );
+		$optimizer = Optimizer::get_instance();
+		$stats     = $optimizer->optimize_file( $retina_file );
 		// If we squeezed out something, Update stats.
 		if ( ! is_wp_error( $stats ) && ! empty( $stats['data'] ) && isset( $stats['data'] ) && $stats['data']->bytes_saved > 0 ) {
 			$image_size = $image_size . '@2x';
@@ -225,7 +222,7 @@ class Common {
 				// if stats for a particular size doesn't exists.
 				if ( empty( $stats['sizes'][ $image_size ] ) ) {
 					// Update size wise details.
-					$stats['sizes'][ $image_size ] = (object) $smush->array_fill_placeholders( $smush->get_size_signature(), (array) $data );
+					$stats['sizes'][ $image_size ] = (object) $this->array_fill_placeholders( $this->get_size_signature(), (array) $data );
 				} else {
 					// Update compression percent and bytes saved for each size.
 					$stats['sizes'][ $image_size ]->bytes   = $stats['sizes'][ $image_size ]->bytes + $data->bytes_saved;
@@ -236,7 +233,7 @@ class Common {
 			// Create new stats.
 			$stats = array(
 				'stats' => array_merge(
-					$smush->get_size_signature(),
+					$this->get_size_signature(),
 					array(
 						'api_version' => - 1,
 						'lossy'       => - 1,
@@ -250,7 +247,7 @@ class Common {
 			$stats['stats']['keep_exif']   = ! empty( $data->keep_exif ) ? $data->keep_exif : 0;
 
 			// Update size wise details.
-			$stats['sizes'][ $image_size ] = (object) $smush->array_fill_placeholders( $smush->get_size_signature(), (array) $data );
+			$stats['sizes'][ $image_size ] = (object) $this->array_fill_placeholders( $this->get_size_signature(), (array) $data );
 		}
 
 		// Calculate the total compression.
@@ -327,14 +324,12 @@ class Common {
 	 * @return string
 	 */
 	public function soliloquy_image_src( $src ) {
-		$cdn = WP_Smush::get_instance()->core()->mod->cdn;
-
-		if ( ! $cdn->get_status() || empty( $src ) ) {
+		if ( ! $this->cdn_helper->is_cdn_active() || empty( $src ) ) {
 			return $src;
 		}
 
-		if ( $cdn->is_supported_path( $src ) ) {
-			return $cdn->generate_cdn_url( $src );
+		if ( $this->cdn_helper->is_supported_url( $src ) ) {
+			return $this->cdn_helper->generate_cdn_url( $src );
 		}
 
 		return $src;
@@ -364,41 +359,6 @@ class Common {
 
 	/**************************************
 	 *
-	 * Jetpack
-	 *
-	 * @since 3.7.1
-	 */
-
-	/**
-	 * Skips the url from the srcset from our CDN when it's already served by Jetpack's CDN.
-	 *
-	 * @since 3.7.1
-	 *
-	 * @param bool   $skip  Should skip? Default: false.
-	 * @param string $url Source.
-	 *
-	 * @return bool
-	 */
-	public function jetpack_cdn_compat( $skip, $url ) {
-		if ( ! class_exists( '\Jetpack' ) ) {
-			return $skip;
-		}
-
-		if ( method_exists( '\Jetpack', 'is_module_active' ) && ! \Jetpack::is_module_active( 'photon' ) ) {
-			return $skip;
-		}
-
-		$parsed_url = wp_parse_url( $url );
-
-		// The image already comes from Jetpack's CDN.
-		if ( preg_match( '#^i[\d]{1}.wp.com$#i', $parsed_url['host'] ) ) {
-			return true;
-		}
-		return $skip;
-	}
-
-	/**************************************
-	 *
 	 * WP Maintenance Plugin
 	 *
 	 * @since 3.8.0
@@ -417,60 +377,8 @@ class Common {
 		global $mt_options;
 
 		if ( ! is_user_logged_in() && ! empty( $mt_options['state'] ) ) {
-			add_filter( 'wp_smush_should_skip_parse', '__return_true' );
+			add_filter( 'wp_smush_should_skip_lazy_load', '__return_true' );
 		}
-	}
-
-	/**************************************
-	 *
-	 * WooCommerce
-	 *
-	 * @since 3.9.0
-	 */
-
-	/**
-	 * Replaces the product's gallery thumbnail URL with the CDN URL.
-	 *
-	 * WC uses a <div data-thumbnail=""> attribute to get the thumbnail
-	 * img src which is then added via JS. Our regex for parsing the page
-	 * doesn't check for this div and attribute (and it shouldn't, it becomes too slow).
-	 *
-	 * We can remove this if we ever use the filter "wp_get_attachment_image_src"
-	 * to replace the images' src URL with the CDN one.
-	 *
-	 * @since 3.9.0
-	 *
-	 * @param string $html The thumbnail markup.
-	 * @return string
-	 */
-	public function woocommerce_cdn_gallery_thumbnails( $html ) {
-		$cdn = WP_Smush::get_instance()->core()->mod->cdn;
-
-		// Replace only when the CDN is active.
-		if ( ! $cdn->get_status() ) {
-			return $html;
-		}
-
-		preg_match_all( '/<(div)\b(?>\s+(?:data-thumb=[\'"](?P<thumb>[^\'"]*)[\'"])|[^\s>]+|\s+)*>/is', $html, $matches );
-
-		if ( ! $matches || ! is_array( $matches ) ) {
-			return $html;
-		}
-
-		foreach ( $matches as $key => $url ) {
-			// Only use the match for the thumbnail URL if it's supported.
-			if ( 'thumb' !== $key || empty( $url[0] ) || ! $cdn->is_supported_path( $url[0] ) ) {
-				continue;
-			}
-
-			// Replace the data-thumb attribute of the div with the CDN link.
-			$cdn_url = $cdn->generate_cdn_url( $url[0] );
-			if ( $cdn_url ) {
-				$html = str_replace( $url[0], $cdn_url, $html );
-			}
-		}
-
-		return $html;
 	}
 
 	/**************************************
@@ -479,41 +387,6 @@ class Common {
 	 *
 	 * @since 3.5
 	 */
-
-	/**
-	 * Lazy loading compatibility checks.
-	 *
-	 * @since 3.5.0
-	 *
-	 * @param bool   $skip   Should skip? Default: false.
-	 * @param string $src    Image url.
-	 * @param string $image  Image.
-	 *
-	 * @return bool
-	 */
-	public function lazy_load_compat( $skip, $src, $image ) {
-		// Avoid conflicts if attributes are set (another plugin, for example).
-		if ( false !== strpos( $image, 'data-src' ) ) {
-			return true;
-		}
-
-		// Compatibility with Essential Grid lazy loading.
-		if ( false !== strpos( $image, 'data-lazysrc' ) ) {
-			return true;
-		}
-
-		// Compatibility with JetPack lazy loading.
-		if ( false !== strpos( $image, 'jetpack-lazy-image' ) ) {
-			return true;
-		}
-
-		// Compatibility with Slider Revolution's lazy loading.
-		if ( false !== strpos( $image, '/revslider/' ) && false !== strpos( $image, 'data-lazyload' ) ) {
-			return true;
-		}
-
-		return $skip;
-	}
 
 	/**
 	 * CDN compatibility with Buddyboss platform
@@ -542,7 +415,8 @@ class Common {
 		 *      images as well which doesn't uses placeholder.
 		 */
 		if ( false !== strpos( $src, 'buddyboss-platform' ) && false !== strpos( $src, 'placeholder.png' ) ) {
-			$new_src = Parser::get_attribute( $image, 'data-src' );
+			$parser  = new Parser();
+			$new_src = $parser->get_element_attribute_value( $image, 'data-src' );
 
 			if ( ! empty( $new_src ) ) {
 				$src = $new_src;
@@ -558,7 +432,7 @@ class Common {
 	 * @since 3.8.8
 	 */
 	public function givewp_skip_image_lazy_load() {
-		add_filter( 'wp_smush_should_skip_parse', '__return_true' );
+		add_filter( 'wp_smush_should_skip_lazy_load', '__return_true' );
 	}
 
 	/**
@@ -672,5 +546,111 @@ class Common {
 		}
 
 		return $new_meta;
+	}
+
+	public function should_transform_page( $should_transform ) {
+		return $should_transform
+		       && ! $this->is_smartcrawl_analysis_request()
+		       && ! $this->is_page_builder_request();
+	}
+
+	/**
+	 * Compatibility with SmartCrawl readability analysis.
+	 * Do not process page on analysis.
+	 *
+	 * @since 3.3.0
+	 */
+	private function is_smartcrawl_analysis_request() {
+		$wds_analysis = filter_input( INPUT_POST, 'action', FILTER_SANITIZE_SPECIAL_CHARS );
+		if ( ! is_null( $wds_analysis ) && 'wds-analysis-recheck' === $wds_analysis ) {
+			return true;
+		}
+
+		if ( null !== filter_input( INPUT_GET, 'wds-frontend-check', FILTER_SANITIZE_SPECIAL_CHARS ) ) {
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Check if this is one of the known page builders.
+	 *
+	 * @return bool
+	 * @since 3.5.1
+	 *
+	 */
+	private function is_page_builder_request() {
+		// Oxygen builder.
+		if ( defined( 'SHOW_CT_BUILDER' ) && SHOW_CT_BUILDER ) {
+			return true;
+		}
+
+		// Oxygen builder as well.
+		if ( null !== filter_input( INPUT_GET, 'ct_builder' ) ) {
+			return true;
+		}
+
+		// Divi builder.
+		if ( null !== filter_input( INPUT_GET, 'et_fb' ) ) {
+			return true;
+		}
+
+		// Beaver builder.
+		if ( null !== filter_input( INPUT_GET, 'fl_builder' ) ) {
+			return true;
+		}
+
+		// Thrive Architect Builder.
+		if ( null !== filter_input( INPUT_GET, 'tve' ) && null !== filter_input( INPUT_GET, 'tcbf' ) ) {
+			return true;
+		}
+
+		// Tatsu page builder.
+		if ( null !== filter_input( INPUT_GET, 'tatsu' ) ) {
+			return true;
+		}
+
+		// BuddyBoss' AJAX requests. They do something strange and end up defining
+		// DOING_AJAX on template_redirect after self::parse_page() runs. That makes
+		// our lazy load page parsing break some of their AJAX requests.
+		if ( function_exists( 'bbp_is_ajax' ) && bbp_is_ajax() ) {
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Returns signature for single size of the smush api message to be saved to db;
+	 *
+	 * @return array
+	 */
+	private function get_size_signature() {
+		return array(
+			'percent'     => 0,
+			'bytes'       => 0,
+			'size_before' => 0,
+			'size_after'  => 0,
+			'time'        => 0,
+		);
+	}
+
+	/**
+	 * Fills $placeholder array with values from $data array
+	 *
+	 * @param array $placeholders  Placeholders array.
+	 * @param array $data          Data to fill with.
+	 *
+	 * @return array
+	 */
+	private function array_fill_placeholders( $placeholders, $data ) {
+		$placeholders['percent']     = $data['compression'];
+		$placeholders['bytes']       = $data['bytes_saved'];
+		$placeholders['size_before'] = $data['before_size'];
+		$placeholders['size_after']  = $data['after_size'];
+		$placeholders['time']        = $data['time'];
+
+		return $placeholders;
 	}
 }

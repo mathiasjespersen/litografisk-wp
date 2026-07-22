@@ -92,40 +92,41 @@ class Runner
      * @param array $arguments The task arguments
      * @throws \Google\Task\Exception when misconfigured
      */
-    public function __construct($config, $name, $action, array $arguments = array())
+    // @phpstan-ignore-next-line
+    public function __construct($config, $name, $action, array $arguments = [])
     {
         if (isset($config['initial_delay'])) {
             if ($config['initial_delay'] < 0) {
-                throw new \WPMailSMTP\Vendor\Google\Task\Exception('Task configuration `initial_delay` must not be negative.');
+                throw new GoogleTaskException('Task configuration `initial_delay` must not be negative.');
             }
             $this->delay = $config['initial_delay'];
         }
         if (isset($config['max_delay'])) {
             if ($config['max_delay'] <= 0) {
-                throw new \WPMailSMTP\Vendor\Google\Task\Exception('Task configuration `max_delay` must be greater than 0.');
+                throw new GoogleTaskException('Task configuration `max_delay` must be greater than 0.');
             }
             $this->maxDelay = $config['max_delay'];
         }
         if (isset($config['factor'])) {
             if ($config['factor'] <= 0) {
-                throw new \WPMailSMTP\Vendor\Google\Task\Exception('Task configuration `factor` must be greater than 0.');
+                throw new GoogleTaskException('Task configuration `factor` must be greater than 0.');
             }
             $this->factor = $config['factor'];
         }
         if (isset($config['jitter'])) {
             if ($config['jitter'] <= 0) {
-                throw new \WPMailSMTP\Vendor\Google\Task\Exception('Task configuration `jitter` must be greater than 0.');
+                throw new GoogleTaskException('Task configuration `jitter` must be greater than 0.');
             }
             $this->jitter = $config['jitter'];
         }
         if (isset($config['retries'])) {
             if ($config['retries'] < 0) {
-                throw new \WPMailSMTP\Vendor\Google\Task\Exception('Task configuration `retries` must not be negative.');
+                throw new GoogleTaskException('Task configuration `retries` must not be negative.');
             }
             $this->maxAttempts += $config['retries'];
         }
         if (!\is_callable($action)) {
-            throw new \WPMailSMTP\Vendor\Google\Task\Exception('Task argument `$action` must be a valid callable.');
+            throw new GoogleTaskException('Task argument `$action` must be a valid callable.');
         }
         $this->action = $action;
         $this->arguments = $arguments;
@@ -150,7 +151,7 @@ class Runner
         while ($this->attempt()) {
             try {
                 return \call_user_func_array($this->action, $this->arguments);
-            } catch (\WPMailSMTP\Vendor\Google\Service\Exception $exception) {
+            } catch (GoogleServiceException $exception) {
                 $allowedRetries = $this->allowedRetries($exception->getCode(), $exception->getErrors());
                 if (!$this->canAttempt() || !$allowedRetries) {
                     throw $exception;
@@ -187,12 +188,12 @@ class Runner
     private function backOff()
     {
         $delay = $this->getDelay();
-        \usleep($delay * 1000000);
+        \usleep((int) ($delay * 1000000));
     }
     /**
      * Gets the delay (in seconds) for the current backoff period.
      *
-     * @return float
+     * @return int
      */
     private function getDelay()
     {
@@ -217,7 +218,7 @@ class Runner
      *
      * @return integer
      */
-    public function allowedRetries($code, $errors = array())
+    public function allowedRetries($code, $errors = [])
     {
         if (isset($this->retryMap[$code])) {
             return $this->retryMap[$code];

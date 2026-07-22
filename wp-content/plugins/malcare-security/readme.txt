@@ -1,12 +1,12 @@
 === MalCare WordPress Security Plugin - Malware Scanner, Cleaner, Security Firewall ===
-Contributors: malcare security, akshatc
-Tags: security, wordpress security, security plugin, firewall, malware scanner, login security, malware removal, improve security
+Contributors: malcare, akshatc
+Tags: wordpress security, firewall, malware scanner, malware removal, vulnerabilities
 Plugin URI: https://www.malcare.com
 Donate link: https://www.malcare.com
 Requires at least: 4.0
-Tested up to: 6.4
-Requires PHP: 5.6.0
-Stable tag: 5.47
+Tested up to: 7.0
+Requires PHP: 7.0
+Stable tag: 6.48
 License: GPLv2 or later
 License URI: [http://www.gnu.org/licenses/gpl-2.0.html](http://www.gnu.org/licenses/gpl-2.0.html)
 
@@ -20,6 +20,9 @@ Security Plugin For WordPress Websites
 ★★★★★
 
 A WordPress security plugin ensures that your website remains completely safe and secure, always. We created [MalCare Security Plugin](https://www.malcare.com/) to help website owners worry less about their site security, achieve peace of mind and focus all their energies on growing their business or website.
+
+**Why you need MalCare Security?**
+[youtube https://www.youtube.com/watch?v=j3h0JF0we4o]
 
 **Difference Between MalCare Free vs Premium**
 
@@ -267,6 +270,13 @@ Hence a MalCare account is needed to use the plugin. This account can also be us
 * [MalCare vs Sucuri vs Wordfence by CodeinWP](https://www.codeinwp.com/blog/sucuri-vs-wordfence-vs-malcare/)
 * [MalCare vs Sucuri vs Wordfence vs SiteLock vs iThemes Security by WPMayor](https://wpmayor.com/malcare-sucuri-wordfence-sitelock-ithemes-security-comparison/)
 
+== SCREENSHOTS  ==
+
+1. One dashboard to stay ahead of malware, vulnerabilities, firewall activity, and critical security events.
+2. Detect hidden malware, clean it in one click, and harden your site against repeat attacks.
+3. The firewall blocks malicious traffic in real time, with geoblocking and activity logs adding extra control and visibility.
+4. Proactive login protection blocks suspicious access, while 2FA and login logs add extra security and more insight into login activity.
+
 == FREQUENTLY ASKED QUESTIONS ==
 
 =Can I Setup my MalCare account myself?=
@@ -296,7 +306,7 @@ To upgrade from a free trial version to a premium account, please take the help 
 To upgrade to a bigger Plan, take the help of **[this guide](http://bit.ly/2RMSBTP)**.
 
 =Do I need to pay for support and help?=
-Never! We will be with you for any queries at any time. **[Click here](https://www.malcare.com/contact/)** to get in touch with us!
+Never! We will be with you for any queries at any time. **[Click here](https://app.malcare.com/contact/?src=nocard)** to get in touch with us!
 
 =How many times does MalCare auto-scan a website?=
 MalCare automatic security scans a website once every 24 hours.
@@ -310,7 +320,7 @@ No, not at all. MalCare Security Service performs all the heavy lifting of scann
 =How does the unlimited cleanup policy work?=
 A situation may occur where your site is being repeatedly infected. In such events, there is no limit to the number of times you can **[clean up a hacked website](http://bit.ly/2RHzkD2)**.
 
-But if the situation persists, then cleaning up the site, again and again, will not solve the problem. In such cases, you can **[contact us](https://www.malcare.com/contact/)**, and we will help improve your security posture. We’d ask you to take proactive measures based on the recommendation of the Support team. We reserve the right to refuse service until appropriate actions are taken from your end. In cases like this, we also reserve the right to deny refund or cancellation of the MalCare Security account.
+But if the situation persists, then cleaning up the site, again and again, will not solve the problem. In such cases, you can **[contact us](https://app.malcare.com/contact/?src=nocard)**, and we will help improve your security posture. We’d ask you to take proactive measures based on the recommendation of the Support team. We reserve the right to refuse service until appropriate actions are taken from your end. In cases like this, we also reserve the right to deny refund or cancellation of the MalCare Security account.
 
 =What do I need to clean my website?=
 In order to begin the cleanup process, we need access to your server and its associated files. (Don’t worry, this will not compromise your site’s security).
@@ -391,18 +401,88 @@ FTP details input into MalCare is processed on our servers. We need your FTP cre
 =Where can I find the MalCare Terms of Use and Privacy Policy?=
 These are available on our website: [Terms of Service](https://www.malcare.com/tos/) and [Privacy Policy](https://www.malcare.com/privacy/)
 
-== SCREENSHOTS  ==
-
-1. It’s extremely easy to add a website to MalCare’s dashboard. All you need to do is add a URL and install the plugin on your website.
-2. MalCare's Early Detecting Technology uses 100+ intelligent signals to detect even the most complex malware that other WordPress security plugins cannot detect.
-3. No more waiting for days or hours to clean your website. Clean your website of malicious code with surgical precision in One-Click.
-4. MalCare offers Login Page Protection which limits the number of failed login attempts made by hackers and bots via Captcha protection.
-5. MalCare's Firewall automatically blocks malicious traffic with its intelligent visitor pattern detection technology.
-6. MalCare helps implement Advanced Website Security Hardening measures to make your site more secure against hackers and bots.
-7. MalCare's Geoblocking effectively blocks countries from visiting your site with just a click of a button.
-8. MalCare’s Uptime Monitoring notifies if a website goes down so that you can handle the situation before starting to lose visitors.
-
 == CHANGELOG ==
+= 6.48 =
+* Fix: Preserve default PHP error handling after PHP Error Monitoring processes an error.
+* Tweak: Reduce repeated firewall IP whitelist lookups.
+
+= 6.47 =
+* Fix: Prevent stale WordPress core update cleanup rules from deleting files added by newer WordPress core packages.
+
+= 6.44 =
+* Tweak: Improved the WP core updates flow.
+* Tweak: Improved the plugin auto-install flow.
+
+= 6.39 =
+* Tweak: Code Restructuring
+* New: Added Connection key support
+
+= 6.36 =
+* New: Added deactivation feedback form to collect user feedback when deactivating the plugin
+* Tweak: Improvements in Auto-login and File System
+* Tweak: Code Restructuring
+
+= 6.02 =
+* Tweak: Improved Authentication
+
+= 5.93 =
+* Tweak: Improvements in bulk upgrade
+
+= 5.92 =
+* Tweak: Improvements in fetching File Stats
+
+= 5.91 =
+* Tweak: Code Restructuring
+
+= 5.88 =
+* Fix: Resolved compatibility issues with WordPress versions below 6.2.
+* Tweak: Added support for PHP 8.4
+
+= 5.85 =
+* New: Added Gravity Forms support in Form Testing.
+* Tweak: Code Restructuring
+
+= 5.81 =
+* Tweak: Enhanced Form Monitoring
+* Tweak: Improved Error Handling
+
+= 5.77 =
+* New: Introduced WP Login Whitelabel
+* Tweak: Enhanced Two-Factor Authentication
+
+= 5.73 =
+* Tweak: Improved handling for Two-Factor Authentication
+
+= 5.72 =
+* New: Introduced Two-Factor Authentication
+* Tweak: Enhanced PHP Error Monitoring feature
+
+= 5.68 =
+* Tweak: DB Version Update
+
+= 5.67 =
+* Fix: Firewall uninstallation issue when using WP-CLI
+
+= 5.65 =
+* New: Introduced Domain Monitoring feature
+* New: Introduced PHP Error Monitoring feature
+* Tweak: Implemented Captcha bypass support for Forminator and Gravity Forms
+* Tweak: Enhanced Firewall
+
+= 5.56 =
+* Better handling for Activate Redirect
+
+= 5.55 =
+* Updating classes in PHP Files
+
+= 5.54 =
+* Adding SVG files.
+
+= 5.53 =
+* UI Improvements.
+* Enhanced Firewall for greater robustness.
+* Manage Improvements.
+
 = 5.47 =
 * Bug fix: Fetch Elementor DB details
 

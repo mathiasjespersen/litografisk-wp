@@ -29,19 +29,11 @@ class Breeze_Ecommerce_Cache {
 	public function update_ecommerce_activation() {
 		$check = get_option( 'breeze_ecommerce_detect' );
 		if ( stripos( $_SERVER['REQUEST_URI'], 'wc-setup&step=locale' ) !== false ) {
-			global $wp_filesystem;
-			if ( empty( $wp_filesystem ) ) {
-				require_once( ABSPATH . '/wp-admin/includes/file.php' );
-				WP_Filesystem();
-			}
+			$wp_filesystem = breeze_get_filesystem();
 			Breeze_ConfigCache::write_config_cache();
 		}
 		if ( ! empty( $check ) ) {
-			global $wp_filesystem;
-			if ( empty( $wp_filesystem ) ) {
-				require_once( ABSPATH . '/wp-admin/includes/file.php' );
-				WP_Filesystem();
-			}
+			$wp_filesystem = breeze_get_filesystem();
 			Breeze_ConfigCache::write_config_cache();
 			update_option( 'breeze_ecommerce_detect', 0 );
 		}
@@ -417,6 +409,70 @@ class Breeze_Ecommerce_Cache {
 	}
 
 	/**
+	 * Exclude pages from cache for the plugin BuddyBoss.
+	 *
+	 * @return array
+	 */
+	public function buddyboss_exclude_urls(): array {
+		$urls  = array();
+		$regex = '*';
+
+		if ( ! function_exists( 'bbp_get_current_user_id' ) || ! function_exists( 'bbp_get_user_profile_url' ) ) {
+			return $urls;
+		}
+
+		if ( class_exists( 'BuddyPress' ) ) {
+			$user_id     = bbp_get_current_user_id();
+			$url_profile = bbp_get_user_profile_url( $user_id );
+			$url_profile = trailingslashit( $url_profile );
+
+			$user = get_userdata( $user_id );
+			if ( ! empty( $user->user_nicename ) ) {
+				$user_nicename = $user->user_nicename;
+				$url_profile   = str_replace( $user_nicename . '/', '', $url_profile );
+			}
+
+			$url_profile = parse_url( $url_profile, PHP_URL_PATH ) . $regex;
+			#$url_profile .= '/profile/' . $regex;
+
+			$urls[] = $url_profile;
+
+			if ( ! empty( $urls ) ) {
+				// Process urls to return
+				$urls = array_unique( $urls );
+				$urls = array_map( array( $this, 'rtrim_urls' ), $urls );
+			}
+		}
+
+		return $urls;
+	}
+
+	/**
+	 * Take page id and checks if it's in the exluded pages list
+	 * when woocommerce is active the exluded pages currently are
+	 * cart,checkout,myaccount.
+	 *
+	 * @param int $page_id
+	 * @return boolean $is_excluded_ecom_page
+	 */
+	public static function is_excluded_ecom_page( $page_id ) {
+
+		$is_excluded_ecom_page = false;
+		if ( class_exists( 'WooCommerce' ) && function_exists( 'wc_get_page_id' ) ) {
+			$cart_id      = wc_get_page_id( 'cart' );
+			$checkout_id  = wc_get_page_id( 'checkout' );
+			$myaccount_id = wc_get_page_id( 'myaccount' );
+			if ( $page_id == $cart_id
+				|| $page_id == $checkout_id
+				|| $page_id == $myaccount_id
+			) {
+				$is_excluded_ecom_page = true;
+			}
+		}
+		return $is_excluded_ecom_page;
+	}
+
+	/**
 	 * Exclude pages of e-commerce from cache
 	 */
 	public function ecommerce_exclude_pages() {
@@ -428,19 +484,19 @@ class Breeze_Ecommerce_Cache {
 			$checkoutId  = wc_get_page_id( 'checkout' );
 			$myaccountId = wc_get_page_id( 'myaccount' );
 
-			if ( $cardId > 0 ) {
+			if ( $cardId > 0 && 'publish' === get_post_status( $cardId ) ) {
 				$urls[] = $this->get_basic_urls( $cardId, $regex );
 				// Get url through multi-languages plugin
 				$urls = $this->get_translate_urls( $urls, $cardId, $regex );
 			}
 
-			if ( $checkoutId > 0 ) {
+			if ( $checkoutId > 0 && 'publish' === get_post_status( $checkoutId ) ) {
 				$urls[] = $this->get_basic_urls( $checkoutId, $regex );
 				// Get url through multi-languages plugin
 				$urls = $this->get_translate_urls( $urls, $checkoutId, $regex );
 			}
 
-			if ( $myaccountId > 0 ) {
+			if ( $myaccountId > 0 && 'publish' === get_post_status( $myaccountId ) ) {
 				$urls[] = $this->get_basic_urls( $myaccountId, $regex );
 				// Get url through multi-languages plugin
 				$urls = $this->get_translate_urls( $urls, $myaccountId, $regex );
@@ -449,6 +505,74 @@ class Breeze_Ecommerce_Cache {
 			// Process urls to return
 			$urls = array_unique( $urls );
 			$urls = array_map( array( $this, 'rtrim_urls' ), $urls );
+		}
+
+		return $urls;
+	}
+
+	/**
+	 * Excludes from cache pages from FooEvents POS plugin.
+	 *
+	 * @return array
+	 * @since 1.1.9
+	 * @access public
+	 */
+	public function exclude_fooevents_pos_pages() {
+		$urls  = array();
+		$regex = '*';
+
+		// Check if FooEvents POS plugin is active
+		if ( defined( 'FOOEVENTS_POS_VERSION' ) || class_exists( 'FooEventsPOS' ) || is_plugin_active( 'fooevents_pos/fooevents-pos.php' ) ) {
+
+			// Get FooEvents POS settings/options
+			$fooevents_pos_settings = get_option( 'fooevents_pos_settings', array() );
+
+			// Common POS page patterns that should be excluded
+			$pos_patterns = array(
+				'/pos/',
+				'/pos/*',
+				'/fooevents-pos/',
+				'/fooevents-pos/*',
+				'/?fooevents_pos=*',
+				'/?page=fooevents-pos*',
+			);
+
+			// Add the patterns to URLs array
+			foreach ( $pos_patterns as $pattern ) {
+				$urls[] = $pattern;
+			}
+
+			// Check for specific POS page ID if exists in settings
+			if ( isset( $fooevents_pos_settings['pos_page_id'] ) && ! empty( $fooevents_pos_settings['pos_page_id'] ) ) {
+				$pos_page_id = absint( $fooevents_pos_settings['pos_page_id'] );
+
+				if ( ! empty( $pos_page_id ) && 'publish' === get_post_status( $pos_page_id ) ) {
+					$urls[] = $this->get_basic_urls( $pos_page_id, $regex );
+					// Get url through multi-languages plugin
+					$urls = $this->get_translate_urls( $urls, $pos_page_id, $regex );
+				}
+			}
+
+			// Check for other potential FooEvents POS page IDs
+			$pos_checkout_page = get_option( 'fooevents_pos_checkout_page', 0 );
+			if ( ! empty( $pos_checkout_page ) && 'publish' === get_post_status( $pos_checkout_page ) ) {
+				$urls[] = $this->get_basic_urls( $pos_checkout_page, $regex );
+				// Get url through multi-languages plugin
+				$urls = $this->get_translate_urls( $urls, $pos_checkout_page, $regex );
+			}
+
+			$pos_admin_page = get_option( 'fooevents_pos_admin_page', 0 );
+			if ( ! empty( $pos_admin_page ) && 'publish' === get_post_status( $pos_admin_page ) ) {
+				$urls[] = $this->get_basic_urls( $pos_admin_page, $regex );
+				// Get url through multi-languages plugin
+				$urls = $this->get_translate_urls( $urls, $pos_admin_page, $regex );
+			}
+
+			// Process urls to return
+			if ( ! empty( $urls ) ) {
+				$urls = array_unique( $urls );
+				$urls = array_map( array( $this, 'rtrim_urls' ), $urls );
+			}
 		}
 
 		return $urls;
@@ -464,7 +588,12 @@ class Breeze_Ecommerce_Cache {
 	public function wc_facebook_feed() {
 		$urls = array();
 		if ( class_exists( 'WC_Facebook_Loader' ) ) {
-			$urls[] = SkyVerge\WooCommerce\Facebook\Products\Feed::get_feed_data_url();
+			if ( class_exists( 'SkyVerge\WooCommerce\Facebook\Products\Feed' ) ) {
+				$urls[] = SkyVerge\WooCommerce\Facebook\Products\Feed::get_feed_data_url();
+			}
+			if ( class_exists( 'WooCommerce\Facebook\Products\Feed' ) ) {
+				$urls[] = WooCommerce\Facebook\Products\Feed::get_feed_data_url();
+			}
 		}
 
 		return $urls;
@@ -477,7 +606,13 @@ class Breeze_Ecommerce_Cache {
 
 		if ( ! empty( $permalink ) ) {
 			// Custom URL structure
-			$url = parse_url( get_permalink( $postID ), PHP_URL_PATH );
+			$url           = parse_url( get_permalink( $postID ), PHP_URL_PATH );
+			$home_url      = trailingslashit( get_home_url() );
+			$home_url_path = parse_url( $home_url, PHP_URL_PATH );
+
+			if ( '/' === $url || $home_url_path === $url || $home_url === $url ) {
+				$url = '/' . get_post_field( 'post_name', $postID ) . '/';
+			}
 		} else {
 			$url = get_permalink( $postID );
 		}
@@ -524,7 +659,7 @@ class Breeze_Ecommerce_Cache {
 		}
 
 		// qTranslate-x plugin
-		require_once( ABSPATH . 'wp-admin/includes/plugin.php' );
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
 		if ( is_plugin_active( 'qtranslate-x/qtranslate.php' ) ) {
 			global $q_config;
 			if ( isset( $q_config ) && function_exists( 'qtranxf_convertURL' ) ) {
@@ -624,6 +759,10 @@ class Breeze_Ecommerce_Cache {
 	 * Remove '/' chacracter of end url
 	 */
 	public function rtrim_urls( $url ) {
+		if ( empty( $url ) || ! is_string( $url ) ) {
+			return $url;
+		}
+
 		return rtrim( $url, '/' );
 	}
 

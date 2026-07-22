@@ -1,4 +1,5 @@
 <?php
+
 /**
  * @copyright 2017  Cloudways  https://www.cloudways.com
  *
@@ -18,21 +19,92 @@
  */
 defined( 'ABSPATH' ) || die( 'No direct script access allowed!' );
 
+/**
+ * Determine whether the current user is operating at the network scope.
+ *
+ * Returns true for Super Admins, users with `manage_network_options`, and
+ * WP-CLI. Used to route multisite-wide Breeze actions to the correct scope
+ * while site administrators continue to act on their own site.
+ *
+ * @return bool
+ */
+function breeze_user_can_manage_network() {
+	if ( ! is_multisite() ) {
+		return false;
+	}
+
+	if ( defined( 'WP_CLI' ) && WP_CLI ) {
+		return true;
+	}
+
+	// User identity functions (`wp_get_current_user`, `is_super_admin`, etc.)
+	// are pluggable and only available once WordPress has loaded
+	// `wp-includes/pluggable.php`. A few Breeze callers initialise during the
+	// plugin-load phase before that file is included; when the user cannot yet
+	// be identified, default to the site scope. The user-aware request paths
+	// (admin-ajax, page renders, REST) all run after pluggable.php and are
+	// unaffected.
+	if ( ! function_exists( 'wp_get_current_user' ) ) {
+		return false;
+	}
+
+	// Capability check first — picks up environments where Network Admin
+	// privileges are granted via capabilities rather than membership in the
+	// `site_admins` list.
+	if ( current_user_can( 'manage_network_options' ) ) {
+		return true;
+	}
+
+	$user_id = get_current_user_id();
+	if ( empty( $user_id ) ) {
+		return false;
+	}
+
+	return is_super_admin( $user_id );
+}
+
+/**
+ * Read the user-supplied `is-network` request flag.
+ *
+ * Returns the raw boolean intent of the request; callers MUST gate the
+ * actual scope change with {@see breeze_user_can_manage_network()}.
+ *
+ * @return bool
+ */
+function breeze_request_wants_network_scope() {
+	if ( ! isset( $_GET['is-network'] ) && ! isset( $_POST['is-network'] ) ) {
+		return false;
+	}
+
+	if ( isset( $_POST['is-network'] ) ) {
+		return filter_var( wp_unslash( $_POST['is-network'] ), FILTER_VALIDATE_BOOLEAN );
+	}
+
+	return filter_var( wp_unslash( $_GET['is-network'] ), FILTER_VALIDATE_BOOLEAN );
+}
+
+/**
+ * Apply network-admin scope to the current request when the current user
+ * is operating at the network level.
+ *
+ * Reads the `is-network` request flag as a strict boolean and only defines
+ * `WP_NETWORK_ADMIN` when `is_multisite()` is true and the current user is
+ * a Super Admin. For all other requests the hint is ignored and the caller
+ * renders in site-local scope. Settings tabs continue to load for site
+ * administrators; writes are scoped to the site via
+ * {@see breeze_update_option()}.
+ */
 function set_as_network_screen() {
-	if ( isset( $_GET['is-network'] ) || isset( $_POST['is-network'] ) ) {
-		$is_network = false;
+	if ( ! isset( $_GET['is-network'] ) && ! isset( $_POST['is-network'] ) ) {
+		return;
+	}
 
-		if ( isset( $_GET['is-network'] ) ) {
-			$is_network = filter_var( $_GET['is-network'], FILTER_VALIDATE_BOOLEAN );
-		}
+	if ( true !== breeze_request_wants_network_scope() ) {
+		return;
+	}
 
-		if ( isset( $_POST['is-network'] ) ) {
-			$is_network = filter_var( $_POST['is-network'], FILTER_VALIDATE_BOOLEAN );
-		}
-
-		if ( true === $is_network && ! defined( 'WP_NETWORK_ADMIN' ) ) {
-			define( 'WP_NETWORK_ADMIN', true );
-		}
+	if ( breeze_user_can_manage_network() && ! defined( 'WP_NETWORK_ADMIN' ) ) {
+		define( 'WP_NETWORK_ADMIN', true );
 	}
 }
 
@@ -40,7 +112,7 @@ function set_as_network_screen() {
  * Retrieve site options accounting for settings inheritance.
  *
  * @param string $option_name
- * @param bool $is_local
+ * @param bool   $is_local
  *
  * @return array
  */
@@ -49,7 +121,10 @@ function breeze_get_option( $option_name, $is_local = false ) {
 
 	global $breeze_network_subsite_settings;
 
-	if ( is_network_admin() && ! $breeze_network_subsite_settings ) {
+	// Reads are routed to the network option only on real Network Admin
+	// screens and when the current user is operating at the network scope;
+	// otherwise the site-local value is returned.
+	if ( is_network_admin() && ! $breeze_network_subsite_settings && breeze_user_can_manage_network() ) {
 		$is_local = false;
 	} elseif ( ! breeze_does_inherit_settings() ) {
 		$inherit = false;
@@ -69,15 +144,22 @@ function breeze_get_option( $option_name, $is_local = false ) {
 }
 
 /**
- * Update site options accounting for multisite.
+ * Update Breeze options at the appropriate scope on multisite.
+ *
+ * Writes use `update_site_option` only when the current user is a Super
+ * Admin acting in the Network Admin context. All other requests use
+ * `update_option` so each site's settings remain isolated.
  *
  * @param string $option_name
- * @param mixed $value
- * @param bool $is_local
+ * @param mixed  $value
+ * @param bool   $is_local
  */
 function breeze_update_option( $option_name, $value, $is_local = false ) {
-	if ( is_network_admin() ) {
+	if ( is_network_admin() && breeze_user_can_manage_network() ) {
 		$is_local = false;
+	} else {
+		// Default to a site-local write for non-network requests.
+		$is_local = true;
 	}
 
 	if ( ! is_multisite() || $is_local ) {
@@ -123,26 +205,74 @@ function breeze_is_supported( $check ) {
 	return $return;
 }
 
+// Function to extract the base domain from a URL
+function breeze_get_base_domain( $domain ) {
+
+	if ( preg_match( '/(?P<domain>[a-z0-9][a-z0-9\-]{1,63}\.[a-z\.]{2,6})$/i', $domain, $regs ) ) {
+		return $regs['domain'];
+	}
+	return false;
+}
+
 /**
  * If an array provided, the function will check all
  * array items to see if all of them are valid URLs.
  *
- * @param array $url_list
- * @param string $extension
+ * @param array $url_list list of URLs to check.
+ * @param bool  $include_dns_check To include real DNS check and/or IP check or not.
  *
  * @return bool
  * @since 1.1.0
- *
  */
-function breeze_validate_urls( $url_list = array() ) {
+function breeze_validate_urls( array $url_list = array(), bool $include_dns_check = false ): bool {
 	if ( ! is_array( $url_list ) ) {
 		return false;
 	}
 
-	$is_valid = true;
+	$is_valid = false;
 	foreach ( $url_list as $url ) {
-		if ( ! filter_var( $url, FILTER_VALIDATE_URL ) ) {
-			$is_valid = false;
+		$url = trim( $url );
+		if ( empty( $url ) ) {
+			continue;
+		}
+
+		if ( false === strpos( $url, ':' ) ) {
+			$url = 'https://' . $url;
+		}
+
+		$parsed_url = wp_parse_url( $url );
+		if ( false === $parsed_url ) {
+			return false;
+		}
+
+		// Encode the path to make it a valid URL.
+		$encoded_path = '';
+		if ( isset( $parsed_url['path'] ) ) {
+			$encoded_path = implode( '/', array_map( 'rawurlencode', explode( '/', $parsed_url['path'] ) ) );
+		}
+
+		// Reconstruct the URL with the encoded path.
+		$encoded_url  = ( isset( $parsed_url['scheme'] ) ? $parsed_url['scheme'] . '://' : '' ) . ( $parsed_url['host'] ?? '' ) . $encoded_path;
+		$encoded_url .= ( isset( $parsed_url['query'] ) ? '?' . $parsed_url['query'] : '' );
+		$encoded_url .= ( isset( $parsed_url['fragment'] ) ? '#' . $parsed_url['fragment'] : '' );
+		$base_domain  = breeze_get_base_domain( $parsed_url['host'] ?? '' );
+
+		if ( empty( $base_domain ) ) {
+			return false;
+		}
+
+		if ( true === $include_dns_check ) {
+			if ( ! checkdnsrr( $base_domain, 'ANY' ) ) {
+				$ip = gethostbyname( $parsed_url['host'] );
+
+				if ( $ip === $parsed_url['host'] ) {
+					return false;
+				}
+			}
+		}
+
+		if ( ! filter_var( $encoded_url, FILTER_VALIDATE_URL ) ) {
+
 			if ( false === $is_valid ) {
 				$is_valid = breeze_validate_url_via_regexp( $url );
 			}
@@ -150,6 +280,8 @@ function breeze_validate_urls( $url_list = array() ) {
 			if ( false === $is_valid ) {
 				$is_valid = breeze_string_contains_exclude_regexp( $url );
 			}
+		} else {
+			$is_valid = true;
 		}
 
 		if ( false === $is_valid ) {
@@ -158,7 +290,6 @@ function breeze_validate_urls( $url_list = array() ) {
 	}
 
 	return $is_valid;
-
 }
 
 function breeze_validate_the_right_extension( $url_list = array(), $extension = 'css' ) {
@@ -228,11 +359,10 @@ function breeze_get_file_extension_from_url( $url_given = '' ) {
  * if not found, an empty array will be resulted.
  *
  * @param string $needle
- * @param array $haystack
+ * @param array  $haystack
  *
  * @return array
  * @since 1.1.0
- *
  */
 function breeze_is_string_in_array_values( $needle = '', $haystack = array() ) {
 	if ( empty( $needle ) || empty( $haystack ) ) {
@@ -242,13 +372,12 @@ function breeze_is_string_in_array_values( $needle = '', $haystack = array() ) {
 	$is_string_in_array = array_filter(
 		$haystack,
 		function ( $var ) use ( $needle ) {
-			#return false;
+			// return false;
 			if ( breeze_string_contains_exclude_regexp( $var ) ) {
 				return breeze_file_match_pattern( $needle, $var );
 			} else {
 				return strpos( $var, $needle ) !== false;
 			}
-
 		}
 	);
 
@@ -259,11 +388,10 @@ function breeze_is_string_in_array_values( $needle = '', $haystack = array() ) {
  * Used to check for regexp exclude pages
  *
  * @param string $needle
- * @param array $haystack
+ * @param array  $haystack
  *
  * @return array
  * @since 1.1.7
- *
  */
 function breeze_check_for_exclude_values( $needle = '', $haystack = array() ) {
 	if ( empty( $needle ) || empty( $haystack ) ) {
@@ -279,7 +407,6 @@ function breeze_check_for_exclude_values( $needle = '', $haystack = array() ) {
 			} else {
 				return false;
 			}
-
 		}
 	);
 
@@ -290,7 +417,6 @@ function breeze_check_for_exclude_values( $needle = '', $haystack = array() ) {
  * Will return true for Google fonts and other type of CDN link
  * that are missing the Scheme from the url
  *
- *
  * @param string $url_to_be_checked
  *
  * @return bool
@@ -299,7 +425,7 @@ function breeze_validate_url_via_regexp( $url_to_be_checked = '' ) {
 	if ( empty( $url_to_be_checked ) ) {
 		return false;
 	}
-	$regex = '((http:|https:?)?\/\/)?([a-z0-9+!*(),;?&=.-]+(:[a-z0-9+!*(),;?&=.-]+)?@)?([a-z0-9\-\.]*)\.(([a-z]{2,4})|([0-9]{1,3}\.([0-9]{1,3})\.([0-9]{1,3})))(:[0-9]{2,5})?(\/([a-z0-9+%-]\.?)+)*\/?(\?[a-z+&$_.-][a-z0-9;:@&%=+/.-/,/:]*)?(#[a-z_.-][a-z0-9+$%_.-]*)?';
+	$regex = '((http:|https:?)?\/\/)?([a-z0-9+!*(),;?&=.-]+(:[a-z0-9+!*(),;?&=.-]+)?@)?([a-z0-9\-\.]*)\.(([a-z]{2,6})|([0-9]{1,3}\.([0-9]{1,3})\.([0-9]{1,3})))(:[0-9]{2,5})?(\/([a-z0-9+%-]\.?)+)*\/?(\?[a-z+&$_.-][a-z0-9;:@&%=+/.-/,/:]*)?(#[a-z_.-][a-z0-9+$%_.-]*)?';
 
 	preg_match( "~^$regex$~i", $url_to_be_checked, $matches_found );
 
@@ -318,7 +444,7 @@ function breeze_validate_url_via_regexp( $url_to_be_checked = '' ) {
  * Exclude JS must contain only .js files
  *
  * @param $file_url
- * @param string $validate
+ * @param string   $validate
  *
  * @return bool
  */
@@ -338,7 +464,6 @@ function breeze_validate_exclude_field_by_extension( $file_url, $validate = 'css
 	}
 
 	return $valid;
-
 }
 
 
@@ -346,7 +471,7 @@ function breeze_validate_exclude_field_by_extension( $file_url, $validate = 'css
  * Function used to determine if the excluded URL contains regexp
  *
  * @param $file_url
- * @param string $validate
+ * @param string   $validate
  *
  * @return bool
  */
@@ -388,154 +513,63 @@ function breeze_file_match_pattern( $file_url, $pattern ) {
 }
 
 /**
- * Will return true/false if the cache headers exist and
- * have values HIT or MISS.
- * HIT = Varnish is enabled and age is cached
- * MISS = Varnish is disabled or the cache has been purged.
- * This method will request only the current url homepage headers
- * and if the first time is a MISS, it will try again.
- *
- * @param int $retry how many retries count.
- * @param int $time_fresh current time to make a fresh connect.
- * @param bool $use_headers To use get_headers or cURL.
+ * Will return true/false if the cache headers exist.
  *
  * @return bool
  */
-function is_varnish_cache_started( $retry = 1, $time_fresh = 0, $use_headers = false ) {
-	if ( empty( $time_fresh ) ) {
-		$time_fresh = time();
+function is_varnish_cache_started() {
+
+	if ( isset( $_SERVER['HTTP_X_VARNISH'] ) && is_numeric( $_SERVER['HTTP_X_VARNISH'] ) ) {
+		return true;
 	}
 
-	// Code specific for Cloudways Server.
-	if ( 1 === $retry ) {
-		$check_local_server = is_varnish_layer_started();
-		if ( true === $check_local_server ) {
-			return true;
-		}
+	// Return false early if varnish is disabled by the user.
+	if ( isset( $data['HTTP_X_APPLICATION'] )
+	&& ( 'varnishpass' === trim( $data['HTTP_X_APPLICATION'] ) || 'bypass' === trim( $data['HTTP_X_APPLICATION'] ) )
+	) {
+		return false;
 	}
 
-	$url_ping = trim( home_url() . '?breeze_check_cache_available=' . $time_fresh );
-
-	if ( true === $use_headers ) {
-		// Making sure the request is only for HEADER info without getting the content from the page
-		$context_options = array(
-			'http' => array(
-				'method'          => 'HEAD',
-				'follow_location' => 1,
-			),
-			'ssl'  => array(
-				'verify_peer' => false,
-			),
-		);
-
-		stream_context_set_default( $context_options );
-		$headers = get_headers( $url_ping, 1 );
-
-		if ( empty( $headers ) ) {
-			$use_headers = false;
-		} else {
-			$headers = array_change_key_case( $headers, CASE_LOWER );
-		}
+	$check_local_server = is_varnish_layer_started();
+	if ( true === $check_local_server ) {
+		return true;
 	}
 
-	if ( false === $use_headers ) {
-		$headers = breeze_get_headers_via_curl( $url_ping );
+	$custom_varnish_active = get_transient( 'breeze_custom_varnish_server_active' );
+
+	if ( false === $custom_varnish_active ) {
+		$custom_varnish_active = (int) breeze_check_custom_varnish();
+		set_transient( 'breeze_custom_varnish_server_active', $custom_varnish_active, 24 * HOUR_IN_SECONDS );
 	}
+
+	return (bool) $custom_varnish_active;
+}
+
+/**
+ * Checks if the varnish is active on website."
+ * x-cache header is checked to verify varnish presence.
+ *
+ * @return bool
+ */
+function breeze_check_custom_varnish() {
+
+	$unique_string = time();
+
+	$url_ping = trim( home_url() . '?breeze_check_cache_available=' . $unique_string );
+
+	$headers = wp_get_http_headers( $url_ping );
 
 	if ( empty( $headers ) ) {
 		return false;
 	}
 
-	if ( true === $headers ) {
+	$headers = array_change_key_case( $headers->getAll(), CASE_LOWER );
+
+	if ( isset( $headers['x-cache'] ) ) {
 		return true;
 	}
 
-	if ( ! isset( $headers['x-cache'] ) ) {
-		if ( 1 === $retry ) {
-			$retry ++;
-
-			return is_varnish_cache_started( $retry, $time_fresh, $use_headers );
-		}
-
-		return false;
-	} else {
-		$cache_header = strtolower( trim( $headers['x-cache'] ) );
-
-		// After the cache is cleared, the first time the headers will say that the cache is not used
-		// After the first header requests, the cache headers are formed.
-		// Checking the second time will give better results.
-		if ( 1 === $retry ) {
-			if ( substr_count( $cache_header, 'hit' ) > 0 ) {
-				return true;
-			} else {
-				$retry ++;
-
-				return is_varnish_cache_started( $retry, $time_fresh, $use_headers );
-			}
-		} else {
-
-			if ( substr_count( $cache_header, 'hit' ) > 0 ) {
-				return true;
-			}
-
-			return false;
-		}
-	}
-}
-
-/**
- * Fallback function to fetch headers.
- *
- * @param string $url_ping URL from where to get the headers.
- *
- * @return array|bool
- */
-function breeze_get_headers_via_curl( $url_ping = '' ) {
-	$connection = curl_init();
-	$headers    = array();
-	curl_setopt( $connection, CURLOPT_URL, $url_ping );
-	curl_setopt( $connection, CURLOPT_NOBODY, true );
-	curl_setopt( $connection, CURLOPT_RETURNTRANSFER, true );
-	curl_setopt( $connection, CURLOPT_FOLLOWLOCATION, true ); // follow redirects
-	curl_setopt( $connection, CURLOPT_SSL_VERIFYPEER, false ); // if the SSL is invalid, curl will have trouble giving the correct response.
-	curl_setopt( $connection, CURLOPT_HEADER, true );// return just headers
-	curl_setopt( $connection, CURLOPT_TIMEOUT, 1 );
-	// this function is called by curl for each header received
-	curl_setopt(
-		$connection,
-		CURLOPT_HEADERFUNCTION,
-		function ( $curl, $header ) use ( &$headers ) {
-			$len    = strlen( $header );
-			$header = explode( ':', $header, 2 );
-			if ( count( $header ) < 2 ) { // ignore invalid headers
-				return $len;
-			}
-
-			$headers[ strtolower( trim( $header[0] ) ) ][] = trim( $header[1] );
-
-			return $len;
-		}
-	);
-
-	curl_exec( $connection );
-	curl_close( $connection );
-
-	// x-cacheable
-	if ( isset( $headers['x-cacheable'] ) ) {
-		$x_cacheable_value = array_pop( $headers['x-cacheable'] );
-		if ( 'yes' === strtolower( $x_cacheable_value ) || 'short' === strtolower( $x_cacheable_value ) ) {
-			return true;
-		}
-	}
-
-	if ( isset( $headers['x-cache'] ) ) {
-		$x_cache_value = array_pop( $headers['x-cache'] );
-
-		return array( 'x-cache' => $x_cache_value );
-	}
-
 	return false;
-
 }
 
 /**
@@ -598,18 +632,130 @@ function breeze_read_write_file( $file_path = '', $content = '' ) {
 		return false;
 	}
 
-	if ( ( $handler = @fopen( $file_path, 'w' ) ) !== false ) { // phpcs:ignore
-		if ( ( @fwrite( $handler, $content ) ) !== false ) { // phpcs:ignore
-			@fclose( $handler ); // phpcs:ignore
-		}
+	$wp_filesystem = breeze_get_filesystem();
+
+	return $wp_filesystem->put_contents( $file_path, $content );
+}
+
+/**
+ * Thread-safe cache file write with proper locking.
+ *
+ * Writes to a temporary file with an exclusive lock, then performs an
+ * atomic rename to the final cache path. This prevents partial writes
+ * and race conditions under high concurrency.
+ *
+ * @param string $file_path      Full path to cache file.
+ * @param string $data           Data to write.
+ * @param int    $modified_time  Timestamp for file modification.
+ * @param bool   $non_blocking   If true, skip if lock is busy instead of waiting.
+ *
+ * @return bool True on success, false on failure.
+ */
+function breeze_safe_cache_write( $file_path, $data, $modified_time, $non_blocking = false ) {
+	if ( empty( $file_path ) ) {
+		return false;
 	}
 
+	// Unpredictable temp name + exclusive create ('xb') prevents symlink/TOCTOU
+	// attacks on shared hosts: an attacker can no longer pre-plant a symlink at
+	// the temp path to redirect our write to a sensitive file.
+	try {
+		$random_suffix = bin2hex( random_bytes( 8 ) );
+	} catch ( \Exception $e ) {
+		error_log( '[Breeze] Failed to generate random temp suffix: ' . $e->getMessage() );
+		return false;
+	}
+	$temp_file = $file_path . '.tmp.' . $random_suffix;
+
+	try {
+		// Open temp file for writing
+		$fp = fopen( $temp_file, 'xb' );
+		if ( false === $fp ) {
+			$last_error = error_get_last();
+			$message    = isset( $last_error['message'] ) ? ' Error: ' . $last_error['message'] : '';
+			error_log( '[Breeze] Failed to open temp file: ' . $temp_file . $message );
+
+			// "Disk full" is the most common cause of write failures in production.
+			// Log free space alongside the error so it's instantly visible in error_log.
+			$free_space = @disk_free_space( dirname( $temp_file ) );
+			if ( false !== $free_space ) {
+				error_log( '[Breeze] Free disk space: ' . round( $free_space / 1024 / 1024, 2 ) . ' MB' );
+			}
+
+			return false;
+		}
+
+		// Try to acquire lock
+		$lock_flags = LOCK_EX;
+		if ( $non_blocking ) {
+			$lock_flags |= LOCK_NB;  // Non-blocking flag
+		}
+
+		if ( ! flock( $fp, $lock_flags ) ) {
+			if ( $non_blocking ) {
+				// Lock is busy - skip this write
+				fclose( $fp );
+				@unlink( $temp_file );
+				return false;  // Not an error - just busy
+			} else {
+				// Blocking mode failed - this is an error
+				$last_error = error_get_last();
+				$message    = isset( $last_error['message'] ) ? ' Error: ' . $last_error['message'] : '';
+				error_log( '[Breeze] Failed to acquire lock: ' . $temp_file . $message );
+				fclose( $fp );
+				@unlink( $temp_file );
+				return false;
+			}
+		}
+
+		// Write data
+		$result = fwrite( $fp, $data );
+
+		// Release lock and close
+		flock( $fp, LOCK_UN );
+		fclose( $fp );
+
+		if ( false === $result ) {
+			$last_error = error_get_last();
+			$message    = isset( $last_error['message'] ) ? ' Error: ' . $last_error['message'] : '';
+			error_log( '[Breeze] Failed to write to temp file: ' . $temp_file . $message );
+			@unlink( $temp_file );
+			return false;
+		}
+
+		// Set modification time
+		if ( ! touch( $temp_file, $modified_time ) ) {
+			$last_error = error_get_last();
+			$message    = isset( $last_error['message'] ) ? ' Error: ' . $last_error['message'] : '';
+			error_log( '[Breeze] Failed to touch temp file: ' . $temp_file . $message );
+			@unlink( $temp_file );
+			return false;
+		}
+
+		// Atomic rename
+		if ( ! rename( $temp_file, $file_path ) ) {
+			$last_error = error_get_last();
+			$message    = isset( $last_error['message'] ) ? ' Error: ' . $last_error['message'] : '';
+			error_log( '[Breeze] Failed to rename temp file: ' . $temp_file . $message );
+			@unlink( $temp_file );
+			return false;
+		}
+
+		return true;
+
+	} catch ( \Exception $e ) {
+		error_log( '[Breeze] Exception writing cache: ' . $e->getMessage() );
+		if ( file_exists( $temp_file ) ) {
+			@unlink( $temp_file );
+		}
+		return false;
+	}
 }
 
 
 function breeze_lock_cache_process( $path = '' ) {
 	$filename    = 'process.lock';
-	$create_lock = fopen( $path . $filename, 'w' );
+	$create_lock = fopen( $path . $filename, 'xb' );
 	if ( false === $create_lock ) {
 		return false;
 	}
@@ -647,7 +793,6 @@ function multisite_blog_id_config() {
 	}
 
 	if ( ! empty( $blog_id ) ) {
-
 	}
 }
 
@@ -656,23 +801,17 @@ function multisite_blog_id_config() {
  * Varnish cache and local cache.
  *
  * @param string $url The url for which to purge the cache.
- * @param false $purge_varnish If the check was already done for Varnish server On/OFF set to true.
- * @param bool $check_varnish If the check for Varnish was not done, set to true to check Varnish server status inside the function.
+ * @param false  $purge_varnish If the check was already done for Varnish server On/OFF set to true.
+ * @param bool   $check_varnish If the check for Varnish was not done, set to true to check Varnish server status inside the function.
  *
  * @since 1.1.10
  */
 function breeze_varnish_purge_cache( $url = '', $purge_varnish = false, $check_varnish = true ) {
-	global $wp_filesystem;
-
-	// Making sure the filesystem is loaded.
-	if ( empty( $wp_filesystem ) ) {
-		require_once( ABSPATH . '/wp-admin/includes/file.php' );
-		WP_Filesystem();
-	}
+	$wp_filesystem = breeze_get_filesystem();
 
 	// Clear the local cache using the product URL.
-	if ( ! empty( $url ) && $wp_filesystem->exists( breeze_get_cache_base_path() . md5( $url ) ) ) {
-		$wp_filesystem->rmdir( breeze_get_cache_base_path() . md5( $url ), true );
+	if ( ! empty( $url ) && $wp_filesystem->exists( breeze_get_cache_base_path() . hash( 'sha256', $url ) ) ) {
+		$wp_filesystem->rmdir( breeze_get_cache_base_path() . hash( 'sha256', $url ), true );
 	}
 
 	if ( false === $purge_varnish && true === $check_varnish ) {
@@ -717,13 +856,16 @@ function breeze_varnish_purge_cache( $url = '', $purge_varnish = false, $check_v
 	if ( ! empty( $parse_url['query'] ) && 'breeze' !== strtolower( $parse_url['query'] ) ) {
 		$purgeme .= '?' . $parse_url['query'];
 	}
+
+	$ssl_verification = apply_filters( 'breeze_ssl_check_certificate', false );
+
 	$request_args = array(
 		'method'    => $purge_method,
 		'headers'   => array(
 			'Host'       => $host,
 			'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
 		),
-		'sslverify' => false,
+		'sslverify' => $ssl_verification,
 	);
 	$response     = wp_remote_request( $schema . $purgeme, $request_args );
 	if ( is_wp_error( $response ) || 200 !== (int) $response['response']['code'] ) {
@@ -766,89 +908,13 @@ function breeze_libraries_already_minified( $script_path = '' ) {
 	}
 
 	return false;
-
 }
 
 add_filter( 'breeze_js_ignore_minify', 'breeze_libraries_already_minified' );
 
 /**
- * Will check if there are any differences between saved option and default.
- *
- * if returns false, the nno changes occurred.
- * If returns true, then there are differences.
- *
- * @param bool $is_network if it's called from multisite network.
- *
- * @return bool
- * @since 1.2.1
- */
-function breeze_is_delayjs_changed( $is_network = false, $blog_id = 0, $root = false ) {
-	if ( true === $is_network ) {
-		$saved_options = get_site_option( 'breeze_advanced_settings' );
-	} elseif ( true === $root ) {
-		$saved_options = get_blog_option( $blog_id, 'breeze_advanced_settings' );
-	} else {
-		$saved_options = get_option( 'breeze_advanced_settings' );
-	}
-
-
-	if ( ! isset( $saved_options['breeze-delay-js-scripts'] ) ) {
-		return true;
-	}
-
-	if ( empty( $saved_options['breeze-delay-js-scripts'] ) ) {
-		return true;
-	}
-
-	$saved_options['breeze-delay-js-scripts'] = array_filter( $saved_options['breeze-delay-js-scripts'] );
-
-	$default_values = array(
-		'gtag',
-		'document.write',
-		'html5.js',
-		'show_ads.js',
-		'google_ad',
-		'blogcatalog.com/w',
-		'tweetmeme.com/i',
-		'mybloglog.com/',
-		'histats.com/js',
-		'ads.smowtion.com/ad.js',
-		'statcounter.com/counter/counter.js',
-		'widgets.amung.us',
-		'ws.amazon.com/widgets',
-		'media.fastclick.net',
-		'/ads/',
-		'comment-form-quicktags/quicktags.php',
-		'edToolbar',
-		'intensedebate.com',
-		'scripts.chitika.net/',
-		'_gaq.push',
-		'jotform.com/',
-		'admin-bar.min.js',
-		'GoogleAnalyticsObject',
-		'plupload.full.min.js',
-		'syntaxhighlighter',
-		'adsbygoogle',
-		'gist.github.com',
-		'_stq',
-		'nonce',
-		'post_id',
-		'data-noptimize',
-		'googletagmanager',
-	);
-
-	$differences   = array_diff( $saved_options['breeze-delay-js-scripts'], $default_values );
-	$differences_2 = array_diff( $default_values, $saved_options['breeze-delay-js-scripts'] );
-
-	if ( empty( $differences ) && empty( $differences_2 ) ) {
-		return false;
-	}
-
-	return true;
-}
-
-/**
  * The Page is AMP so don't minifiy stuff.
+ *
  * @return bool
  * @since 1.2.3
  */
@@ -860,160 +926,125 @@ function breeze_is_amp_page() {
 	return false;
 }
 
-
-function breeze_migrate_old_settings( $is_sigle = true, $subsite_id = 0, $is_root = false ) {
-	//If this is a single site.
-	if ( true === $is_sigle ) {
-		// if the option exists, then we do not need to do anything.
-		// This option is not available to Breeze versions < 2.0.0.
-		$new_option = breeze_get_option( 'file_settings', true );
-		if ( ! empty( $new_option ) ) {
-			return;
-		}
-
-		$get_current_basic    = breeze_get_option( 'basic_settings', true );
-		$get_current_advanced = breeze_get_option( 'advanced_settings', true );
-		$get_current_varnish  = breeze_get_option( 'varnish_cache', true );
-		$get_current_cdn      = breeze_get_option( 'cdn_integration', true );
-		$options              = array();
+function breeze_rtrim_urls( $url ) {
+	if ( empty( $url ) ) {
+		$url = '';
 	}
 
-	// if multisite then run code for sub-site.
-	if ( false === $is_sigle && ! empty( $subsite_id ) ) {
-		$subsite_id = absint( $subsite_id );
-		// if the option exists, then we do not need to do anything.
-		// This option is not available to Breeze versions < 2.0.0.
-		$new_option = get_blog_option( $subsite_id, 'breeze_file_settings', array() );
-		if ( ! empty( $new_option ) ) {
-			return;
-		}
+	return rtrim( $url, '/' );
+}
 
-		$get_current_basic    = get_blog_option( $subsite_id, 'breeze_basic_settings', array() );
-		$get_current_advanced = get_blog_option( $subsite_id, 'breeze_advanced_settings', array() );
-		$get_current_varnish  = get_blog_option( $subsite_id, 'breeze_varnish_cache', array() );
-		$get_current_cdn      = get_blog_option( $subsite_id, 'breeze_cdn_integration', array() );
+/**
+ * Check the CDN url to see if it's safe to use.
+ *
+ * @param $cdn_url
+ *
+ * @return false|string
+ * @since 2.0.11
+ */
+function breeze_static_check_cdn_url( $cdn_url ) {
+	if ( empty( trim( $cdn_url ) ) ) {
+		return false;
 	}
 
-	// if multisite and network level.
-	if ( true === $is_root ) {
-		$new_option = get_site_option( 'breeze_file_settings', array() );
-		if ( ! empty( $new_option ) ) {
-			return;
-		}
+	$breeze_user_agent = 'breeze-cdn-check-help-user';
 
-		$get_current_basic    = get_site_option( 'breeze_basic_settings', array() );
-		$get_current_advanced = get_site_option( 'breeze_advanced_settings', array() );
-		$get_current_varnish  = get_site_option( 'breeze_varnish_cache', array() );
-		$get_current_cdn      = get_site_option( 'breeze_cdn_integration', array() );
+	$verify_host      = 2;
+	$ssl_verification = apply_filters( 'breeze_ssl_check_certificate', true );
+	if ( ! is_bool( $ssl_verification ) ) {
+		$ssl_verification = true;
 	}
 
-	if ( ! empty( $get_current_basic ) ) {
-		foreach ( $get_current_basic as $option_name => $value ) {
-			$options[ $option_name ] = $value;
-		}
+	if ( defined( 'WP_DEBUG' ) && true === WP_DEBUG ) {
+		$ssl_verification = false;
+		$verify_host      = 0;
 	}
 
-	if ( ! empty( $get_current_advanced ) ) {
-		foreach ( $get_current_advanced as $option_name => $value ) {
-			$options[ $option_name ] = $value;
-		}
+	$cdn_url = ltrim( $cdn_url, 'https:' );
+	$cdn_url = 'https:' . $cdn_url;
+
+	if ( false === filter_var( $cdn_url, FILTER_VALIDATE_URL ) ) {
+		return false;
 	}
 
-	if ( ! empty( $get_current_varnish ) ) {
-		foreach ( $get_current_varnish as $option_name => $value ) {
-			$options[ $option_name ] = $value;
-		}
-	}
+	$connection = curl_init( 'https://sitecheck.sucuri.net/api/v3/?scan=' . $cdn_url );
+	curl_setopt( $connection, CURLOPT_RETURNTRANSFER, true );
+	curl_setopt( $connection, CURLOPT_SSL_VERIFYHOST, $verify_host );
+	curl_setopt( $connection, CURLOPT_SSL_VERIFYPEER, $ssl_verification );
+	curl_setopt( $connection, CURLOPT_USERAGENT, $breeze_user_agent );
+	curl_setopt( $connection, CURLOPT_REFERER, home_url() );
 
-	if ( ! empty( $get_current_cdn ) ) {
-		foreach ( $get_current_cdn as $option_name => $value ) {
-			$options[ $option_name ] = $value;
+	/**
+	 * Accept up to 3 maximum redirects before cutting the connection.
+	 */
+	curl_setopt( $connection, CURLOPT_MAXREDIRS, 3 );
+	curl_setopt( $connection, CURLOPT_FOLLOWLOCATION, true );
+	$the_json = curl_exec( $connection );
+	curl_close( $connection );
+
+	$is_json = json_decode( $the_json, true );
+	if ( $is_json === null && json_last_error() !== JSON_ERROR_NONE ) {
+		// incorrect data show error message
+		$is_safe = false;
+	} else {
+		// decoded with success
+		$is_safe = false;
+		if ( isset( $is_json['warnings'], $is_json['warnings']['security'], $is_json['warnings']['security']['malware'] ) ) {
+			$is_safe = 'warning';
 		}
 	}
 
-	$basic = array(
-		'breeze-active'           => ( isset( $options['breeze-active'] ) ? $options['breeze-active'] : '1' ),
-		'breeze-cross-origin'     => ( isset( $options['breeze-cross-origin'] ) ? $options['breeze-cross-origin'] : '0' ),
-		'breeze-disable-admin'    => ( isset( $options['breeze-disable-admin'] ) ? $options['breeze-disable-admin'] : array() ),
-		'breeze-gzip-compression' => ( isset( $options['breeze-gzip-compression'] ) ? $options['breeze-gzip-compression'] : '1' ),
-		'breeze-browser-cache'    => ( isset( $options['breeze-browser-cache'] ) ? $options['breeze-browser-cache'] : '1' ),
-		'breeze-lazy-load'        => ( isset( $options['breeze-lazy-load'] ) ? $options['breeze-lazy-load'] : '0' ),
-		'breeze-lazy-load-native' => ( isset( $options['breeze-lazy-load-native'] ) ? $options['breeze-lazy-load-native'] : '0' ),
-		'breeze-desktop-cache'    => '1',
-		'breeze-mobile-cache'     => '1',
-		'breeze-display-clean'    => '1',
-		'breeze-ttl'              => ( isset( $options['breeze-ttl'] ) ? $options['breeze-ttl'] : 1440 ),
-	);
+	return $is_safe;
+}
 
-	$file = array(
-		'breeze-minify-html'        => ( isset( $options['breeze-minify-html'] ) ? $options['breeze-minify-html'] : '0' ),
-		// --
-		'breeze-minify-css'         => ( isset( $options['breeze-minify-css'] ) ? $options['breeze-minify-css'] : '0' ),
-		'breeze-font-display-swap'  => ( isset( $options['breeze-font-display-swap'] ) ? $options['breeze-font-display-swap'] : '0' ),
-		'breeze-group-css'          => ( isset( $options['breeze-group-css'] ) ? $options['breeze-group-css'] : '0' ),
-		'breeze-exclude-css'        => ( isset( $options['breeze-exclude-css'] ) ? $options['breeze-exclude-css'] : array() ),
-		'breeze-include-inline-css' => ( isset( $options['breeze-include-inline-css'] ) ? $options['breeze-include-inline-css'] : '0' ),
-		// --
-		'breeze-minify-js'          => ( isset( $options['breeze-minify-js'] ) ? $options['breeze-minify-js'] : '0' ),
-		'breeze-group-js'           => ( isset( $options['breeze-group-js'] ) ? $options['breeze-group-js'] : '0' ),
-		'breeze-include-inline-js'  => ( isset( $options['breeze-include-inline-js'] ) ? $options['breeze-include-inline-js'] : '0' ),
-		'breeze-exclude-js'         => ( isset( $options['breeze-exclude-js'] ) ? $options['breeze-exclude-js'] : array() ),
-		'breeze-move-to-footer-js'  => ( isset( $options['breeze-move-to-footer-js'] ) ? $options['breeze-move-to-footer-js'] : array() ),
-		'breeze-defer-js'           => ( isset( $options['breeze-defer-js'] ) ? $options['breeze-defer-js'] : array() ),
-		'breeze-enable-js-delay'    => ( isset( $options['breeze-enable-js-delay'] ) ? $options['breeze-enable-js-delay'] : '0' ),
-		'breeze-delay-js-scripts'   => ( isset( $options['breeze-delay-js-scripts'] ) ? $options['breeze-delay-js-scripts'] : array() ),
+/**
+ * Fetch homepage headers by cURL ping no cache.
+ *
+ * @param int     $retry How many retries.
+ * @param int     $time_fresh If you want to use a custom number instead of time.
+ * @param boolean $use_headers whether to use the function stream_context_set_default
+ *
+ * @return bool|array
+ */
+function breeze_helper_fetch_headers( int $time_fresh = 0 ) {
+	// Code specific for Cloudways Server.
 
-	);
+	// use time to get un-cached version.
+	if ( empty( $time_fresh ) ) {
+		$time_fresh = time();
+	}
+	$url_ping = trim( trailingslashit( home_url() ) . '?no-cache=' . $time_fresh );
+	$url_ping = str_replace( 'http://', 'https://', $url_ping );
 
-	$preload = array(
-		'breeze-preload-fonts' => ( isset( $options['breeze-preload-fonts'] ) ? $options['breeze-preload-fonts'] : array() ),
-		'breeze-preload-links' => ( isset( $options['breeze-preload-links'] ) ? $options['breeze-preload-links'] : '0' ),
-	);
+	$request = wp_remote_head( $url_ping );
 
-	$advanced = array(
-		'breeze-exclude-urls'  => ( isset( $options['breeze-exclude-urls'] ) ? $options['breeze-exclude-urls'] : array() ),
-		'cached-query-strings' => ( isset( $options['cached-query-strings'] ) ? $options['cached-query-strings'] : array() ),
-		'breeze-wp-emoji'      => ( isset( $options['breeze-wp-emoji'] ) ? $options['breeze-wp-emoji'] : '0' ),
-	);
-
-	$wp_content = substr( WP_CONTENT_DIR, strlen( ABSPATH ) );
-	$cdn        = array(
-		'cdn-active'          => ( isset( $options['cdn-active'] ) ? $options['cdn-active'] : '0' ),
-		'cdn-relative-path'   => ( isset( $options['cdn-relative-path'] ) ? $options['cdn-relative-path'] : '1' ),
-		'cdn-url'             => ( isset( $options['cdn-url'] ) ? $options['cdn-url'] : '' ),
-		'cdn-content'         => ( isset( $options['cdn-content'] ) ? $options['cdn-content'] : array( 'wp-includes', $wp_content ) ),
-		'cdn-exclude-content' => ( isset( $options['cdn-exclude-content'] ) ? $options['cdn-exclude-content'] : array( '.php' ) ),
-	);
-
-	$varnish = array(
-		'auto-purge-varnish'       => ( isset( $options['auto-purge-varnish'] ) ? $options['auto-purge-varnish'] : '1' ),
-		'breeze-varnish-server-ip' => ( isset( $options['breeze-varnish-server-ip'] ) ? $options['breeze-varnish-server-ip'] : '127.0.0.1' ),
-	);
-
-	if ( true === $is_sigle ) {
-		breeze_update_option( 'basic_settings', $basic, true );
-		breeze_update_option( 'file_settings', $file, true );
-		breeze_update_option( 'preload_settings', $preload, true );
-		breeze_update_option( 'advanced_settings', $advanced, true );
-		breeze_update_option( 'cdn_integration', $cdn, true );
-		breeze_update_option( 'varnish_cache', $varnish, true );
+	// Check for success.
+	if (
+		is_wp_error( $request ) ||
+		! isset( $request['headers'] ) ||
+		! ( 200 === $request['response']['code'] || 201 === $request['response']['code'] )
+	) {
+		return;
 	}
 
-	if ( false === $is_sigle && ! empty( $subsite_id ) ) {
-		update_blog_option( $subsite_id, 'breeze_basic_settings', $basic );
-		update_blog_option( $subsite_id, 'breeze_file_settings', $file );
-		update_blog_option( $subsite_id, 'breeze_preload_settings', $preload );
-		update_blog_option( $subsite_id, 'breeze_advanced_settings', $advanced );
-		update_blog_option( $subsite_id, 'breeze_cdn_integration', $cdn );
-		update_blog_option( $subsite_id, 'breeze_varnish_cache', $varnish );
+	$headers = iterator_to_array( $request['headers'] );
+
+	return $headers;
+}
+
+/**
+ * Helper function to get the WordPress Filesystem object.
+ * Initializes the filesystem if it's not already set up.
+ *
+ * @return WP_Filesystem_Base The WordPress filesystem object.
+ */
+function breeze_get_filesystem(): WP_Filesystem_Base {
+	global $wp_filesystem;
+
+	if ( empty( $wp_filesystem ) ) {
+		require_once ABSPATH . '/wp-admin/includes/file.php';
+		WP_Filesystem();
 	}
 
-	if ( true === $is_root ) {
-		update_site_option( 'breeze_basic_settings', $basic );
-		update_site_option( 'breeze_file_settings', $file );
-		update_site_option( 'breeze_preload_settings', $preload );
-		update_site_option( 'breeze_advanced_settings', $advanced );
-		update_site_option( 'breeze_cdn_integration', $cdn );
-		update_site_option( 'breeze_varnish_cache', $varnish );
-	}
+	return $wp_filesystem;
 }

@@ -1,9 +1,16 @@
 <?php
-
+// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fread
+// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
+// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fsockopen
+// We use php method like fread, fwrite to read only a portion of a file, we don't have a direct method for partial reads since WP_Filesystem doesn't support a direct equivalent to fread, fwrite.
+// The entire file deals with custom stream handling
+// We need direct socket/file operations for this functionality
+// WordPress filesystem alternatives wouldn't work for this use case
+// It's better to disable these specific rules at file level than adding individual ignore comments
 if (!defined('ABSPATH')) exit;
-if (!class_exists('BVRespStream')) :
+if (!class_exists('MCRespStream')) :
 
-	class BVStream extends BVCallbackBase {
+	class MCStream extends MCCallbackBase {
 		public $bvb64stream;
 		public $bvb64cksize;
 		public $checksum;
@@ -20,9 +27,9 @@ if (!class_exists('BVRespStream')) :
 		public static function startStream($account, $request) {
 			$result = array();
 			$params = $request->params;
-			$stream = new BVRespStream($request);
+			$stream = new MCRespStream($request);
 			if ($request->isAPICall()) {
-				$stream = new BVHttpStream($request);
+				$stream = new MCHttpStream($request);
 				if (!$stream->connect()) {
 					$apicallstatus = array(
 						"httperror" => "Cannot Open Connection to Host",
@@ -68,26 +75,31 @@ if (!class_exists('BVRespStream')) :
 		}
 	}
 
-class BVRespStream extends BVStream {
+class MCRespStream extends MCStream {
 	public $bvboundry;
 
 	function __construct($request) {
 		parent::__construct($request);
-		$this->bvboundry = $request->bvboundry;
+		// Restrict boundary to safe chars so raw echo cannot inject into response (XSS).
+		$raw = isset($request->bvboundry) ? (string) $request->bvboundry : '';
+		$sanitized = preg_replace('/[^a-zA-Z0-9_-]/', '', $raw);
+		$this->bvboundry = $sanitized !== '' ? $sanitized : 'bvstream';
 	}
 
 	public function writeChunk($chunk) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- bvboundry sanitized in constructor; raw stream protocol (not HTML), chunk must not be escaped or stream is corrupted
 		echo $this->bvboundry . "ckckckckck" . $chunk . $this->bvboundry . "ckckckckck";
 	}
 	public function endStream() {
+		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- bvboundry sanitized in constructor; raw stream protocol (not HTML)
 		echo $this->bvboundry . "rerererere";
 
 		return array();
 	}
 }
 
-class BVHttpStream extends BVStream {
-	var $user_agent = 'BVHttpStream';
+class MCHttpStream extends MCStream {
+	var $user_agent = 'MCHttpStream';
 	var $host;
 	var $port;
 	var $timeout = 20;
@@ -169,7 +181,7 @@ class BVHttpStream extends BVStream {
 			"Content-Disposition" => "form-data; name=bvinfile; filename=data",
 			"Content-Type" => "application/octet-stream"
 		);
-		$rnd = rand(100000, 999999);
+		$rnd = rand(100000, 999999); // phpcs:ignore WordPress.WP.AlternativeFunctions.rand_rand
 		$this->boundary = "----".$rnd;
 		$prologue = "--".$this->boundary."\r\n";
 		foreach($mph as $key=>$val) {
@@ -244,4 +256,5 @@ class BVHttpStream extends BVStream {
 		return $response;
 	}
 }
+// phpcs:enable
 endif;

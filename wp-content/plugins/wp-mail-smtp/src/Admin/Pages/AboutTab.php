@@ -2,9 +2,10 @@
 
 namespace WPMailSMTP\Admin\Pages;
 
+use Plugin_Upgrader;
 use WPMailSMTP\Admin\PageAbstract;
 use WPMailSMTP\Admin\PluginsInstallSkin;
-use WPMailSMTP\Admin\PluginsInstallUpgrader;
+use WPMailSMTP\Helpers\Helpers;
 
 /**
  * About tab.
@@ -276,13 +277,13 @@ class AboutTab extends PageAbstract {
 				'path' => 'wpforms-lite/wpforms.php',
 				'icon' => wp_mail_smtp()->assets_url . '/images/about/plugin-wpf.png',
 				'name' => esc_html__( 'WPForms', 'wp-mail-smtp' ),
-				'desc' => esc_html__( 'The best drag & drop WordPress form builder. Easily create beautiful contact forms, surveys, payment forms, and more with our 100+ form templates. Trusted by over 5 million websites as the best forms plugin.', 'wp-mail-smtp' ),
+				'desc' => esc_html__( 'The best drag & drop WordPress form builder. Easily create beautiful contact forms, surveys, payment forms, and more with our 600+ form templates. Trusted by over 5 million websites as the best forms plugin.', 'wp-mail-smtp' ),
 				'url'  => 'https://downloads.wordpress.org/plugin/wpforms-lite.zip',
 				'pro'  => [
 					'path' => 'wpforms/wpforms.php',
 					'icon' => wp_mail_smtp()->assets_url . '/images/about/plugin-wpf.png',
 					'name' => esc_html__( 'WPForms Pro', 'wp-mail-smtp' ),
-					'desc' => esc_html__( 'The best drag & drop WordPress form builder. Easily create beautiful contact forms, surveys, payment forms, and more with our 100+ form templates. Trusted by over 5 million websites as the best forms plugin.', 'wp-mail-smtp' ),
+					'desc' => esc_html__( 'The best drag & drop WordPress form builder. Easily create beautiful contact forms, surveys, payment forms, and more with our 600+ form templates. Trusted by over 5 million websites as the best forms plugin.', 'wp-mail-smtp' ),
 					'url'  => 'https://wpforms.com/?utm_source=WordPress&utm_medium=about&utm_campaign=smtp',
 				],
 			],
@@ -346,7 +347,7 @@ class AboutTab extends PageAbstract {
 				'path' => 'pushengage/main.php',
 				'icon' => wp_mail_smtp()->assets_url . '/images/about/plugin-pushengage.png',
 				'name' => esc_html__( 'PushEngage', 'wp-mail-smtp' ),
-				'desc' => esc_html__( 'Connect with your visitors after they leave your website with the leading web push notification software. Over 10,000+ businesses worldwide use PushEngage to send 9 billion notifications each month.', 'wp-mail-smtp' ),
+				'desc' => esc_html__( 'Connect with your visitors after they leave your website with the leading web push notification software. Over 10,000+ businesses worldwide use PushEngage to send 15 billion notifications each month.', 'wp-mail-smtp' ),
 				'url'  => 'https://downloads.wordpress.org/plugin/pushengage.zip',
 			],
 			'smash-balloon-instagram-feeds' => [
@@ -412,7 +413,7 @@ class AboutTab extends PageAbstract {
 				'desc' => esc_html__( 'Boost your sales and conversions by up to 15% with real-time social proof notifications. TrustPulse helps you show live user activity and purchases to help convince other users to purchase.', 'wp-mail-smtp' ),
 				'url'  => 'https://downloads.wordpress.org/plugin/trustpulse-api.zip',
 			],
-			'searchwp'                     => [
+			'searchwp'                      => [
 				'path' => '',
 				'icon' => wp_mail_smtp()->assets_url . '/images/about/searchwp.png',
 				'name' => esc_html__( 'SearchWP', 'wp-mail-smtp' ),
@@ -475,6 +476,69 @@ class AboutTab extends PageAbstract {
 					'url'  => 'https://sugarcalendar.com/?utm_source=WordPress&utm_medium=about&utm_campaign=smtp',
 				],
 			],
+			'wp-charitable'                 => [
+				'path' => 'charitable/charitable.php',
+				'icon' => wp_mail_smtp()->assets_url . '/images/about/plugin-charitable.png',
+				'name' => esc_html__( 'Charitable', 'wp-mail-smtp' ),
+				'desc' => esc_html__( 'Top-rated WordPress donation and fundraising plugin. Over 10,000+ non-profit organizations and website owners use Charitable to create fundraising campaigns and raise more money online.', 'wp-mail-smtp' ),
+				'url'  => 'https://downloads.wordpress.org/plugin/charitable.zip',
+			],
+			'wpcode'                        => [
+				'path' => 'insert-headers-and-footers/ihaf.php',
+				'icon' => wp_mail_smtp()->assets_url . '/images/about/plugin-wpcode.png',
+				'name' => esc_html__( 'WPCode Lite', 'wp-mail-smtp' ),
+				'desc' => esc_html__( 'Future proof your WordPress customizations with the most popular code snippet management plugin for WordPress. Trusted by over 1,500,000+ websites for easily adding code to WordPress right from the admin area.', 'wp-mail-smtp' ),
+				'url'  => 'https://downloads.wordpress.org/plugin/insert-headers-and-footers.zip',
+				'pro'  => [
+					'path' => 'wpcode-premium/wpcode.php',
+					'icon' => wp_mail_smtp()->assets_url . '/images/about/plugin-wpcode.png',
+					'name' => esc_html__( 'WPCode Pro', 'wp-mail-smtp' ),
+					'desc' => esc_html__( 'Future proof your WordPress customizations with the most popular code snippet management plugin for WordPress. Trusted by over 1,500,000+ websites for easily adding code to WordPress right from the admin area.', 'wp-mail-smtp' ),
+					'url'  => 'https://wpcode.com/?utm_source=WordPress&utm_medium=about&utm_campaign=smtp',
+				],
+			],
+			'duplicator'                    => [
+				'path' => 'duplicator/duplicator.php',
+				'icon' => wp_mail_smtp()->assets_url . '/images/about/duplicator-icon-large.png',
+				'name' => esc_html__( 'Duplicator', 'wp-mail-smtp' ),
+				'desc' => esc_html__( 'Leading WordPress backup & site migration plugin. Over 1,500,000+ smart website owners use Duplicator to make reliable and secure WordPress backups to protect their websites. It also makes website migration really easy.', 'wp-mail-smtp' ),
+				'url'  => 'https://downloads.wordpress.org/plugin/duplicator.zip',
+				'pro'  => [
+					'path' => 'duplicator-pro/duplicator-pro.php',
+					'icon' => wp_mail_smtp()->assets_url . '/images/about/duplicator-icon-large.png',
+					'name' => esc_html__( 'Duplicator Pro', 'wp-mail-smtp' ),
+					'desc' => esc_html__( 'Leading WordPress backup & site migration plugin. Over 1,500,000+ smart website owners use Duplicator to make reliable and secure WordPress backups to protect their websites. It also makes website migration really easy.', 'wp-mail-smtp' ),
+					'url'  => 'https://duplicator.com/?utm_source=WordPress&utm_medium=about&utm_campaign=smtp',
+				],
+			],
+			'activelayer'                   => [
+				'path' => 'activelayer-anti-spam-spam-protection-for-forms-comments/activelayer-anti-spam-spam-protection-for-forms-comments.php',
+				'icon' => wp_mail_smtp()->assets_url . '/images/about/icon-activelayer.svg',
+				'name' => esc_html__( 'ActiveLayer', 'wp-mail-smtp' ),
+				'desc' => esc_html__( 'Smarter spam protection for WordPress. Catch spam in milliseconds with AI, invisible to your real visitors.', 'wp-mail-smtp' ),
+				'url'  => 'https://downloads.wordpress.org/plugin/activelayer-anti-spam-spam-protection-for-forms-comments.zip',
+			],
+			'wpconsent'                     => [
+				'path' => 'wpconsent-cookies-banner-privacy-suite/wpconsent.php',
+				'icon' => wp_mail_smtp()->assets_url . '/images/about/icon-wpconsent.svg',
+				'name' => esc_html__( 'WPConsent', 'wp-mail-smtp' ),
+				'desc' => esc_html__( 'Stay GDPR & privacy compliant. Add a cookie consent banner to your site and meet privacy laws in minutes.', 'wp-mail-smtp' ),
+				'url'  => 'https://downloads.wordpress.org/plugin/wpconsent-cookies-banner-privacy-suite.zip',
+			],
+			'wpvibe'                        => [
+				'path' => 'vibe-ai/vibe-ai.php',
+				'icon' => wp_mail_smtp()->assets_url . '/images/about/plugin-vibe-ai.png',
+				'name' => esc_html__( 'Vibe AI', 'wp-mail-smtp' ),
+				'desc' => esc_html__( 'AI-powered tools for WordPress. Work faster and smarter with automation built for your WordPress workflow.', 'wp-mail-smtp' ),
+				'url'  => 'https://downloads.wordpress.org/plugin/vibe-ai.zip',
+			],
+			'universally'                   => [
+				'path' => 'universally-language-translation-multilingual-tool/universally.php',
+				'icon' => wp_mail_smtp()->assets_url . '/images/about/icon-universally.svg',
+				'name' => esc_html__( 'Universally', 'wp-mail-smtp' ),
+				'desc' => esc_html__( 'Make your WordPress site accessible to everyone. Automatic accessibility fixes and a visitor widget, no coding required.', 'wp-mail-smtp' ),
+				'url'  => 'https://downloads.wordpress.org/plugin/universally-language-translation-multilingual-tool.zip',
+			],
 		];
 
 		return $data;
@@ -486,9 +550,6 @@ class AboutTab extends PageAbstract {
 	 * @since 2.9.0
 	 */
 	public static function ajax_plugin_activate() {
-
-		// Run a security check.
-		check_ajax_referer( 'wp-mail-smtp-about', 'nonce' );
 
 		$error = esc_html__( 'Could not activate the plugin. Please activate it from the Plugins page.', 'wp-mail-smtp' );
 
@@ -535,9 +596,6 @@ class AboutTab extends PageAbstract {
 	 */
 	public static function ajax_plugin_install() { // phpcs:ignore:Generic.Metrics.CyclomaticComplexity.TooHigh
 
-		// Run a security check.
-		check_ajax_referer( 'wp-mail-smtp-about', 'nonce' );
-
 		$error = esc_html__( 'Could not install the plugin.', 'wp-mail-smtp' );
 
 		// Check for permissions.
@@ -568,7 +626,14 @@ class AboutTab extends PageAbstract {
 			)
 		);
 
+		/*
+		 * The `request_filesystem_credentials` function will output a credentials form in case of failure.
+		 * We don't want that, since it will break AJAX response. So just hide output with a buffer.
+		 */
+		ob_start();
+		// phpcs:ignore WPForms.Formatting.EmptyLineAfterAssigmentVariables.AddEmptyLine
 		$creds = request_filesystem_credentials( $url, '', false, false, null );
+		ob_end_clean();
 
 		// Check for file system permissions.
 		if ( false === $creds ) {
@@ -582,8 +647,11 @@ class AboutTab extends PageAbstract {
 		// Do not allow WordPress to search/download translations, as this will break JS output.
 		remove_action( 'upgrader_process_complete', [ 'Language_Pack_Upgrader', 'async_upgrade' ], 20 );
 
+		// Import the plugin upgrader.
+		Helpers::include_plugin_upgrader();
+
 		// Create the plugin upgrader with our custom skin.
-		$installer = new PluginsInstallUpgrader( new PluginsInstallSkin() );
+		$installer = new Plugin_Upgrader( new PluginsInstallSkin() );
 
 		// Error check.
 		if ( ! method_exists( $installer, 'install' ) ) {
@@ -598,6 +666,10 @@ class AboutTab extends PageAbstract {
 		if ( $installer->plugin_info() ) {
 
 			$plugin_basename = $installer->plugin_info();
+
+			if ( $plugin_basename === 'wpforms-lite/wpforms.php' ) {
+				add_option( 'wpforms_installation_source', 'wp-mail-smtp-about-us' );
+			}
 
 			// Activate the plugin silently.
 			$activated = activate_plugin( $plugin_basename );

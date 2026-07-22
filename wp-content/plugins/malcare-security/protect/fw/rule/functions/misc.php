@@ -1,8 +1,9 @@
 <?php
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 if (!defined('ABSPATH') && !defined('MCDATAPATH')) exit;
 
-if (!trait_exists('MCProtectFWRuleMiscFunc_V547')) :
-trait MCProtectFWRuleMiscFunc_V547 {
+if (!trait_exists('MCProtectFWRuleMiscFunc_V648')) :
+trait MCProtectFWRuleMiscFunc_V648 {
 	private function _rf_isTrue() {
 		$args = $this->processRuleFunctionParams(
 			'isTrue',
@@ -55,7 +56,7 @@ trait MCProtectFWRuleMiscFunc_V547 {
 		$name = $args[0];
 
 		if (!array_key_exists($name, $this->variables)) {
-			throw new MCProtectRuleError_V547(
+			throw new MCProtectRuleError_V648(
 				$this->addExState("UndefinedVariableError: " . $name . " is not defined.")
 			);
 		}
@@ -116,7 +117,7 @@ trait MCProtectFWRuleMiscFunc_V547 {
 		}
 		$resp = MCHelper::safePregMatch((string) $pattern, (string) $subject);
 		if ($resp === false) {
-			throw new MCProtectRuleError_V547(
+			throw new MCProtectRuleError_V648(
 				$this->addExState('BVHelper::safePregMatch' . serialize($subject))
 			);
 		} elseif ($resp > 0) {
@@ -157,7 +158,7 @@ trait MCProtectFWRuleMiscFunc_V547 {
 		}
 		$count = preg_match_all((string) $pattern, (string) $subject, $matches);
 		if ($count === false) {
-			throw new MCProtectRuleError_V547(
+			throw new MCProtectRuleError_V648(
 				$this->addExState("preg_match_all: " . serialize($subject))
 			);
 		}
@@ -183,7 +184,7 @@ trait MCProtectFWRuleMiscFunc_V547 {
 		}
 		$count = preg_match_all((string) $pattern, (string) $subject, $matches);
 		if ($count === false) {
-			throw new MCProtectRuleError_V547(
+			throw new MCProtectRuleError_V648(
 				$this->addExState("preg_match_all: " . serialize($subject))
 			);
 		}
@@ -378,6 +379,7 @@ trait MCProtectFWRuleMiscFunc_V547 {
 			func_get_args()
 		);
 
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_debug_backtrace -- Needed for stack trace functionality
 		return debug_backtrace();
 	}
 
@@ -436,6 +438,90 @@ trait MCProtectFWRuleMiscFunc_V547 {
 		$constant_name = $args[0];
 
 		return defined($constant_name);
+	}
+
+	private function _rf_isArray() {
+		$args = $this->processRuleFunctionParams(
+			'isArray',
+			func_num_args(),
+			func_get_args(),
+			1
+		);
+		$value = $args[0];
+
+		return is_array($value);
+	}
+
+	private function _rf_isString() {
+		$args = $this->processRuleFunctionParams(
+			'isString',
+			func_num_args(),
+			func_get_args(),
+			1
+		);
+		$value = $args[0];
+
+		return is_string($value);
+	}
+
+	private function _rf_isInt() {
+		$args = $this->processRuleFunctionParams(
+			'isInt',
+			func_num_args(),
+			func_get_args(),
+			1
+		);
+		$value = $args[0];
+
+		return is_int($value);
+	}
+
+	private function _rf_isBool() {
+		$args = $this->processRuleFunctionParams(
+			'isBool',
+			func_num_args(),
+			func_get_args(),
+			1
+		);
+		$value = $args[0];
+
+		return is_bool($value);
+	}
+
+	private function _rf_isFloat() {
+		$args = $this->processRuleFunctionParams(
+			'isFloat',
+			func_num_args(),
+			func_get_args(),
+			1
+		);
+		$value = $args[0];
+
+		return is_float($value);
+	}
+
+	private function _rf_isObject() {
+		$args = $this->processRuleFunctionParams(
+			'isObject',
+			func_num_args(),
+			func_get_args(),
+			1
+		);
+		$value = $args[0];
+
+		return is_object($value);
+	}
+
+	private function _rf_getType() {
+		$args = $this->processRuleFunctionParams(
+			'getType',
+			func_num_args(),
+			func_get_args(),
+			1
+		);
+		$value = $args[0];
+
+		return gettype($value);
 	}
 }
 endif;

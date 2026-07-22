@@ -20,7 +20,7 @@ class BVWPDynSync {
 
 	function init() {
 		$this->add_actions_and_listeners();
-		add_action('clear_dynsync_config', array($this, 'clearConfig'));
+		add_action('mc_clear_dynsync_config', array($this, 'clearConfig'));
 	}
 
 	public function clearConfig() {
@@ -677,7 +677,6 @@ class BVWPDynSync {
 		add_action('woocommerce_deleted_order_downloadable_permissions', array($this, 'woocommerce_deleted_order_downloadable_permissions_handler'), 10, 1);
 
 		add_action('woocommerce_new_payment_token', array($this, 'woocommerce_payment_token_handler'), 10, 1);
-		add_action('woocommerce_payment_token_created', array($this, 'woocommerce_payment_token_handler'), 10, 1);
 		add_action('woocommerce_payment_token_updated', array($this, 'woocommerce_payment_token_handler'), 10, 1);
 		add_action('woocommerce_payment_token_deleted', array($this, 'woocommerce_payment_token_deleted_handler'), 10, 2);
 		add_action('added_payment_token_meta', array($this, 'woocommerce_payment_token_meta_handler' ), 10, 4);

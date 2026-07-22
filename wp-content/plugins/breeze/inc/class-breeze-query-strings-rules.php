@@ -1,4 +1,7 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 class Breeze_Query_Strings_Rules {
 
@@ -54,6 +57,7 @@ class Breeze_Query_Strings_Rules {
 		'gdftrk',
 		'gdffi',
 		'_ke',
+		'_kx',
 		'redirect_log_mongo_id',
 		'redirect_mongo_id',
 		'sb_referer_host',
@@ -82,7 +86,8 @@ class Breeze_Query_Strings_Rules {
 	private static $instance = null;
 
 	function __construct() {
-
+		// Include necessary helper functions.
+		require_once $this->trailingslashit( dirname( __FILE__ ) ) . '/helpers.php';
 	}
 
 	public static function get_instance() {
@@ -91,6 +96,15 @@ class Breeze_Query_Strings_Rules {
 		}
 
 		return self::$instance;
+	}
+
+	/**
+	 * Appends a trailing slash.
+	 * @param $value the path.
+	 * @return string path with a trailing slash added.
+	 */
+	public function trailingslashit( $value ) {
+		return rtrim( $value, '/\\' ) . '/';
 	}
 
 	public function fetch_ignored_list() {
@@ -108,6 +122,19 @@ class Breeze_Query_Strings_Rules {
 	public function fetch_always_cache_list() {
 		$this->always_cache_query = apply_filters( 'breeze_always_cache_query_strings', $this->always_cache_query );
 
+		// Append user-defined "Cache Query Strings" from Breeze settings so each value generates a separate cache.
+		if (
+			isset( $GLOBALS['breeze_config'], $GLOBALS['breeze_config']['cached-query-strings'] ) &&
+			! empty( $GLOBALS['breeze_config']['cached-query-strings'] ) &&
+			is_array( $GLOBALS['breeze_config']['cached-query-strings'] )
+		) {
+			$this->always_cache_query = array_merge(
+				$this->always_cache_query,
+				array_values( $GLOBALS['breeze_config']['cached-query-strings'] )
+			);
+			$this->always_cache_query = array_unique( $this->always_cache_query );
+		}
+
 		// woocommerce_geolocation_ajax
 		if ( isset( $GLOBALS['breeze_config']['woocommerce_geolocation_ajax_inherit'] ) && ! empty( $GLOBALS['breeze_config']['woocommerce_geolocation_ajax_inherit'] ) ) {
 			$sub_blog_id = $GLOBALS['breeze_config']['blog_id'];
@@ -119,8 +146,7 @@ class Breeze_Query_Strings_Rules {
 			) {
 				$this->always_cache_query[] = 'v';
 			}
-
-		} else if ( isset( $GLOBALS['breeze_config']['woocommerce_geolocation_ajax'] ) && 1 === (int) $GLOBALS['breeze_config']['woocommerce_geolocation_ajax'] ) {
+		} elseif ( isset( $GLOBALS['breeze_config']['woocommerce_geolocation_ajax'] ) && 1 === (int) $GLOBALS['breeze_config']['woocommerce_geolocation_ajax'] ) {
 			$this->always_cache_query[] = 'v';
 		}
 
@@ -205,12 +231,10 @@ class Breeze_Query_Strings_Rules {
 					$cache_page = false;
 					break;
 				}
-
 			}
 			if ( false === $cache_page ) {
 				return false;
 			}
-
 
 			// IF user defines query strings that can be cached.
 			if (
@@ -275,7 +299,14 @@ class Breeze_Query_Strings_Rules {
 		}
 
 		$current_url_query = parse_url( $url, PHP_URL_QUERY );
-		parse_str( $current_url_query, $breeze_query_output );
+
+		if ( ! empty( $current_url_query ) ) {
+			parse_str( $current_url_query, $breeze_query_output );
+		}
+
+		if ( empty( $breeze_query_output ) ) {
+			$breeze_query_output = array();
+		}
 
 		return $breeze_query_output;
 	}
@@ -298,7 +329,7 @@ class Breeze_Query_Strings_Rules {
 		);
 
 		// Only process links if the request is GET.
-		if ( 'GET' !== $_SERVER['REQUEST_METHOD'] || empty( $current_url ) ) {
+		if ( ( isset( $_SERVER['REQUEST_METHOD'] ) && 'GET' !== $_SERVER['REQUEST_METHOD'] ) || empty( $current_url ) ) {
 			return $found_items;
 		}
 
@@ -310,7 +341,6 @@ class Breeze_Query_Strings_Rules {
 		$extracted_vars = $this->extract_query_strings( $current_url );
 		// Query strings that are not found anywhere.
 		$not_found_anywhere = $extracted_vars;
-
 
 		if (
 			isset( $GLOBALS['breeze_config'], $GLOBALS['breeze_config']['cached-query-strings'] ) &&
@@ -327,9 +357,7 @@ class Breeze_Query_Strings_Rules {
 			}
 		}
 
-
 		foreach ( $extracted_vars as $index => $value ) {
-			$index = mb_strtolower( trim( $index ) );
 
 			// Fetch all the query vars that are in the ignore list and found in current URL.
 			if ( in_array( $index, $ignored_query_vars, true ) ) {
@@ -346,11 +374,14 @@ class Breeze_Query_Strings_Rules {
 			}
 
 			// Fetch all the query vars that are in the must cache list and found in current URL, user defined.
-			if ( in_array( $index, $user_defined_query_vars, true ) ) {
-				$found_items['user_cached_no'] ++;
-				$found_items['user_cached_items'][ $index ] = $value;
-				unset( $not_found_anywhere[ $index ] );
-			}
+			// if ( 
+			// 	in_array( $index, $user_defined_query_vars, true ) 
+			// 	|| ! empty( breeze_is_string_in_array_values( $index, $user_defined_query_vars ) )
+			// ) {
+			// 	$found_items['user_cached_no'] ++;
+			// 	$found_items['user_cached_items'][ $index ] = $value;
+			// 	unset( $not_found_anywhere[ $index ] );
+			// }
 		}
 
 		$found_items['extra_query_no']   = count( $not_found_anywhere );

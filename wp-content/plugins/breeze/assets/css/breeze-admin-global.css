@@ -33,4 +33,9 @@
   box-sizing: unset;
 }
 
-/*# sourceMappingURL=breeze-admin-global.css.map */
+@media screen and (max-width: 782px) {
+  #wpadminbar li#wp-admin-bar-breeze-topbar {
+    display: block;
+    position: static;
+  }
+}

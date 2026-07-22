@@ -1,12 +1,11 @@
 <?php
-
 if (!defined('ABSPATH')) exit;
-if (!class_exists('BVFSWriteCallback')) :
+if (!class_exists('MCFSWriteCallback')) :
 
-class BVFSWriteCallback extends BVCallbackBase {
+class MCFSWriteCallback extends MCCallbackBase {
 
 	const MEGABYTE = 1048576;
-	const FS_WRITE_WING_VERSION = 1.0;
+	const FS_WRITE_WING_VERSION = 1.2;
 	
 	public function __construct() {
 	}
@@ -53,7 +52,7 @@ class BVFSWriteCallback extends BVCallbackBase {
 				}
 
 			} else {
-
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- Using mkdir() directly as there is no direct suport for recursion
 				$dir_result['status'] = mkdir($dir, $permissions, $recursive);
 				if ($dir_result['status'] === false) {
 					$dir_result['error'] = "MKDIR_FAILED";
@@ -71,29 +70,29 @@ class BVFSWriteCallback extends BVCallbackBase {
 	public function removeDirs($dirs) {
 		$result = array();
 
-		foreach($dirs as $dir) {
+		foreach ($dirs as $dir) {
 			$dir_result = array();
 
-			if (is_dir($dir) && !is_link($dir)) {
-
+			if ((MCWPFileSystem::getInstance()->isDir($dir) === true) && !is_link($dir)) {
 				if ($this->isEmptyDir($dir)) {
-
-					$dir_result['status'] = rmdir($dir);
+					$dir_result['status'] = MCWPFileSystem::getInstance()->rmdir($dir);
 					if ($dir_result['status'] === false) {
 						$dir_result['error'] = "RMDIR_FAILED";
+						$fs_error = MCWPFileSystem::getInstance()->checkForErrors();
+						if (isset($fs_error)) {
+							$dir_result['fs_error'] = $fs_error;
+						}
 					}
-
 				} else {
 					$dir_result['status'] = false;
 					$dir_result['error'] = "NOT_EMPTY";
 				}
-
 			} else {
 				$dir_result['status'] = false;
 				$dir_result['error'] = "NOT_DIR";
 			}
 
-			$result[$dir] = $dir_result; 
+			$result[$dir] = $dir_result;
 		}
 
 		$result['status'] = true;
@@ -117,16 +116,18 @@ class BVFSWriteCallback extends BVCallbackBase {
 	public function doChmod($path_infos) {
 		$result = array();
 
-		foreach($path_infos as $path => $mode) {
+		foreach ($path_infos as $path => $mode) {
 			$path_result = array();
 
-			if (file_exists($path)) {
-
-				$path_result['status'] = chmod($path, $mode);
+			if (MCWPFileSystem::getInstance()->exists($path) === true) {
+				$path_result['status'] = MCWPFileSystem::getInstance()->chmod($path, $mode);
 				if ($path_result['status'] === false) {
 					$path_result['error'] = "CHMOD_FAILED";
+					$fs_error = MCWPFileSystem::getInstance()->checkForErrors();
+					if (isset($fs_error)) {
+						$path_result['fs_error'] = $fs_error;
+					}
 				}
-
 			} else {
 				$path_result['status'] = false;
 				$path_result['error'] = "NOT_FOUND";
@@ -139,6 +140,10 @@ class BVFSWriteCallback extends BVCallbackBase {
 		return $result;
 	}
 
+	// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+	// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fread
+	// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
+	// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 	public function concatFiles($ifiles, $ofile, $bsize, $offset) {
 		if (($offset !== 0) && (!file_exists($ofile))) {
 			return array(
@@ -217,21 +222,27 @@ class BVFSWriteCallback extends BVCallbackBase {
 
 		return $result;
 	}
+	// phpcs:enable
 
 	public function renameFiles($path_infos) {
 		$result = array();
 
-		foreach($path_infos as $oldpath => $newpath) {
+		foreach ($path_infos as $oldpath => $newpath) {
 			$action_result = array();
-			$failed = array();
 
-			if (file_exists($oldpath)) {
-
-				$action_result['status'] = rename($oldpath, $newpath);
+			if (MCWPFileSystem::getInstance()->exists($oldpath)) {
+				$action_result['status'] = MCWPFileSystem::getInstance()->move($oldpath, $newpath, true);
 				if ($action_result['status'] === false) {
 					$action_result['error'] = "RENAME_FAILED";
+					$fs_error = MCWPFileSystem::getInstance()->checkForErrors();
+					if (isset($fs_error)) {
+						$action_result['fs_error'] = $fs_error;
+					}
+				} else {
+					if (function_exists('opcache_invalidate')) {
+						$action_result['opcache'] = opcache_invalidate($newpath, true);
+					}
 				}
-
 			} else {
 				$action_result['status'] = false;
 				$action_result['error'] = "NOT_FOUND";
@@ -245,6 +256,7 @@ class BVFSWriteCallback extends BVCallbackBase {
 	}
 
 	public function curlFile($ifile_url, $ofile, $timeout) {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
 		$fp = fopen($ofile, "wb+");
 		if ($fp === false) {
 			return array(
@@ -253,8 +265,9 @@ class BVFSWriteCallback extends BVCallbackBase {
 		}
 
 		$result = array();
+
+		// phpcs:disable WordPress.WP.AlternativeFunctions.curl_curl_init, WordPress.WP.AlternativeFunctions.curl_curl_exec, WordPress.WP.AlternativeFunctions.curl_curl_setopt, WordPress.WP.AlternativeFunctions.curl_curl_close, WordPress.WP.AlternativeFunctions.curl_curl_error, WordPress.WP.AlternativeFunctions.curl_curl_errno
 		$ch = curl_init($ifile_url);
-		curl_setopt($ch, CURLOPT_BINARYTRANSFER, 1);
 		curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
 		curl_setopt($ch, CURLOPT_HEADER, 0);
 		curl_setopt($ch, CURLOPT_FILE, $fp);
@@ -265,13 +278,19 @@ class BVFSWriteCallback extends BVCallbackBase {
 		}
 
 		curl_close($ch);
+
+		// phpcs:enable WordPress.WP.AlternativeFunctions.curl_curl_init, WordPress.WP.AlternativeFunctions.curl_curl_exec, WordPress.WP.AlternativeFunctions.curl_curl_setopt, WordPress.WP.AlternativeFunctions.curl_curl_close, WordPress.WP.AlternativeFunctions.curl_curl_error, WordPress.WP.AlternativeFunctions.curl_curl_errno
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 		fclose($fp);
+
 
 		return $result;
 	}
 
 	public function streamCopyFile($ifile_url, $ofile) {
 		$result = array();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
 		$handle = fopen($ifile_url, "rb");
 
 		if ($handle === false) {
@@ -280,9 +299,10 @@ class BVFSWriteCallback extends BVCallbackBase {
 			);
 		}
 
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
 		$fp = fopen($ofile, "wb+");
 		if ($fp === false) {
-			fclose($handle);
+			fclose($handle); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 
 			return array(
 				'error' => 'FOPEN_FAILED_FOR_OFILE'
@@ -293,8 +313,8 @@ class BVFSWriteCallback extends BVCallbackBase {
 			$result['error'] = "UNABLE_TO_WRITE_TO_TMP_OFILE";
 		}
 
-		fclose($handle);
-		fclose($fp);
+		fclose($handle); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+		fclose($fp); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 
 		return $result;
 	}
@@ -302,17 +322,13 @@ class BVFSWriteCallback extends BVCallbackBase {
 	public function writeContentToFile($content, $ofile) {
 		$result = array();
 
-		$fp = fopen($ofile, "wb+");
-		if ($fp === false) {
-			return array(
-				'error' => 'FOPEN_FAILED_FOR_TEMP_OFILE'
-			);
+		if (MCWPFileSystem::getInstance()->putContents($ofile, $content) === false) {
+			$result['error'] = 'UNABLE_TO_WRITE_TO_TMP_OFILE';
+			$fs_error = MCWPFileSystem::getInstance()->checkForErrors();
+			if (isset($fs_error)) {
+				$result['fs_error'] = $fs_error;
+			}
 		}
-
-		if (fwrite($fp, $content) === false) {
-			$result['error'] = "UNABLE_TO_WRITE_TO_TMP_OFILE";
-		}
-		fclose($fp);
 
 		return $result;
 	}
@@ -320,10 +336,15 @@ class BVFSWriteCallback extends BVCallbackBase {
 	public function moveUploadedFile($ofile) {
 		$result = array();
 
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.NonceVerification.Missing
 		if (isset($_FILES['myfile'])) {
+			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.NonceVerification.Missing -- tmp_name is a path and nonce is ignored here
 			$myfile = $_FILES['myfile'];
 			$is_upload_ok = false;
 
+			// Validate PHP upload errors manually
+			// This approach handles any file type (PHP, ZIP, SQL, etc.) without MIME restrictions
+			// Uses WordPress Filesystem API instead of wp_handle_upload() which is designed for media uploads
 			switch ($myfile['error']) {
 			case UPLOAD_ERR_OK:
 				$is_upload_ok = true;
@@ -345,8 +366,26 @@ class BVFSWriteCallback extends BVCallbackBase {
 			}
 
 			if ($is_upload_ok) {
-				if (move_uploaded_file($myfile['tmp_name'], $ofile) === false) {
+				$tmp_name = $myfile['tmp_name'];
+
+				// Ensure target directory exists
+				$target_dir = dirname($ofile);
+				if (!file_exists($target_dir)) {
+					// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- Using mkdir() directly as there is no direct support for recursion
+					if (!mkdir($target_dir, 0777, true)) {
+						$result['error'] = 'MKDIR_FAILED_FOR_TARGET';
+						return $result;
+					}
+				}
+
+				// Use WordPress Filesystem API to move the uploaded file
+				// This is WordPress.org compliant and handles any file type
+				if (MCWPFileSystem::getInstance()->move($tmp_name, $ofile, true) === false) {
 					$result['error'] = 'MOVE_UPLOAD_FILE_FAILED';
+					$fs_error = MCWPFileSystem::getInstance()->checkForErrors();
+					if (isset($fs_error)) {
+						$result['fs_error'] = $fs_error;
+					}
 				}
 			}
 
@@ -401,6 +440,72 @@ class BVFSWriteCallback extends BVCallbackBase {
 		return $resp;
 	}
 
+	public function runFileCmd($cmd_key, $cmd_params) {
+		switch ($cmd_key) {
+		case "wrtfle":
+			return $this->uploadFile($cmd_params);
+		case "renmefle":
+			$from = $cmd_params['from'];
+			$to = $cmd_params['to'];
+			$rename_result = $this->renameFiles(array($from => $to));
+			return isset($rename_result[$from]) ? $rename_result[$from] : array('status' => false, 'error' => 'RENAME_NO_RESULT');
+		case "chmd":
+			$path = $cmd_params['path'];
+			$chmod_result = $this->doChmod(array($path => $cmd_params['mode']));
+			return isset($chmod_result[$path]) ? $chmod_result[$path] : array('status' => false, 'error' => 'CHMOD_NO_RESULT');
+		case "mkdr":
+			$path = $cmd_params['path'];
+			$perms = isset($cmd_params['perms']) ? $cmd_params['perms'] : 0777;
+			$rec = isset($cmd_params['rec']) ? (bool) $cmd_params['rec'] : true;
+			$mkdir_result = $this->makeDirs(array($path), $perms, $rec);
+			return isset($mkdir_result[$path]) ? $mkdir_result[$path] : array('status' => false, 'error' => 'MKDIR_NO_RESULT');
+		case "rmfle":
+			$files = $cmd_params['files'];
+			$rm_result = $this->removeFiles($files);
+			$first = reset($files);
+			return isset($rm_result[$first]) ? $rm_result[$first] : array('status' => false, 'error' => 'RMFLE_NO_RESULT');
+		case "rmdr":
+			$dirs = $cmd_params['dirs'];
+			$rmdr_result = $this->removeDirs($dirs);
+			$first = reset($dirs);
+			return isset($rmdr_result[$first]) ? $rmdr_result[$first] : array('status' => false, 'error' => 'RMDR_NO_RESULT');
+		default:
+			return array('status' => false, 'error' => 'UNKNOWN_CMD');
+		}
+	}
+
+	public function executeFileOps($ops, $all_required = false) {
+		$result = array();
+		$all_success = true;
+
+		foreach ($ops as $op) {
+			$identifier = $op['identifier'];
+			$cmds = $op['cmds'];
+			$op_result = array();
+
+			foreach ($cmds as $cmd) {
+				foreach ($cmd as $cmd_key => $cmd_params) {
+					$cmd_result = $this->runFileCmd($cmd_key, $cmd_params);
+					$op_result[$cmd_key] = $cmd_result;
+
+					if (isset($cmd_result['status']) && $cmd_result['status'] === false) {
+						$all_success = false;
+						break 2;
+					}
+				}
+			}
+
+			$result[$identifier] = $op_result;
+
+			if ($all_required && !$all_success) {
+				break;
+			}
+		}
+
+		$result['status'] = $all_success;
+		return $result;
+	}
+
 	public function process($request) {
 		$params = $request->params;
 
@@ -423,8 +528,12 @@ class BVFSWriteCallback extends BVCallbackBase {
 		case "wrtfle":
 			$resp = $this->uploadFile($params);
 			break;
+		case "fleops":
+			$all_required = isset($params['all_required']) ? (bool) $params['all_required'] : false;
+			$resp = $this->executeFileOps($params['ops'], $all_required);
+			break;
 		case "cncatfls":
-			$bsize = (isset($params['bsize'])) ? $params['bsize'] : (8 * BVFSWriteCallback::MEGABYTE);
+			$bsize = (isset($params['bsize'])) ? $params['bsize'] : (8 * MCFSWriteCallback::MEGABYTE);
 			$offset = (isset($params['offset'])) ? $params['offset'] : 0;
 			$resp = $this->concatFiles($params['infiles'], $params['ofile'], $bsize, $offset);
 			break;

@@ -1,8 +1,10 @@
 <?php
-
 /**
  * Handles the ajax load for tabs.
  */
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 class Breeze_Tab_Loader {
 
 	function __construct() {
@@ -20,20 +22,24 @@ class Breeze_Tab_Loader {
 			'tools',
 			'faq',
 			'varnish',
+			'heartbeat',
+			'one-click-optimization',
 		);
 
-		$requested_tab = $_GET['request_tab'];
+		$requested_tab = ( isset( $_GET['request_tab'] ) ? $_GET['request_tab'] : 'basic' );
 
-		if ( ! in_array( $requested_tab, $accepted_tabs, true ) ) {
-			echo '<h3>The requested tab does not exist</h3>';
+		if ( ! in_array( $requested_tab, $accepted_tabs, true ) || true === breeze_is_restricted_access( true ) ) {
+			die( '<h3>The requested tab does not exist</h3>' );
 		}
 		ob_start();
 		Breeze_Admin::render( $requested_tab );
 		$html_tab_data = ob_get_contents();
 		ob_end_clean();
 
+		// Output trusted admin HTML content from plugin's own render function
+		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 		echo $html_tab_data;
-		die();
+		wp_die();
 	}
 }
 

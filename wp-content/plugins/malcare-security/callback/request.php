@@ -1,8 +1,8 @@
 <?php
 
 if (!defined('ABSPATH')) exit;
-if (!class_exists('BVCallbackRequest')) :
-	class BVCallbackRequest {
+if (!class_exists('MCCallbackRequest')) :
+	class MCCallbackRequest {
 		public $params;
 		public $method;
 		public $wing;
@@ -24,6 +24,11 @@ if (!class_exists('BVCallbackRequest')) :
 		public $bvprmsmac;
 		public $bvboundry;
 
+		private static $SIG_HASH_ALGO_MAP = array(
+			'1' => OPENSSL_ALGO_SHA1,
+			'7' => OPENSSL_ALGO_SHA256
+		);
+
 		public function __construct($account, $in_params, $settings) {
 			$this->params = array();
 			$this->account = $account;
@@ -34,7 +39,7 @@ if (!class_exists('BVCallbackRequest')) :
 			$this->is_admin_ajax = array_key_exists('adajx', $in_params);
 			$this->is_debug = array_key_exists('bvdbg', $in_params);
 			$this->sig = $in_params['sig'];
-			$this->sighshalgo = !empty($in_params['sighshalgo']) ? $in_params['sighshalgo'] : null;
+			$this->sighshalgo = !empty($in_params['sighshalgo']) ? $in_params['sighshalgo'] : '1';
 			$this->time = intval($in_params['bvTime']);
 			$this->version = $in_params['bvVersion'];
 			$this->is_sha1 = array_key_exists('sha1', $in_params);
@@ -51,34 +56,21 @@ if (!class_exists('BVCallbackRequest')) :
 			return array_key_exists('apicall', $this->params);
 		}
 
-		public function curlRequest($url, $body) {
-			$ch = curl_init($url);
-			curl_setopt($ch, CURLOPT_POST, 1);
-			curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-			curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($body));
-			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-			return curl_exec($ch);
-		}
-
-		public function fileGetContentRequest($url, $body) {
-			$options = array(
-				'http' => array(
-					'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
-					'method'  => 'POST',
-					'content' => http_build_query($body)
-				)
-			);
-
-			$context  = stream_context_create($options);
-			return file_get_contents($url, false, $context);
-		}
-
 		public function http_request($url, $body) {
-			if (in_array('curl', get_loaded_extensions())) {
-				return $this->curlRequest($url, $body);
-			} else {
-				return $this->fileGetContentRequest($url, $body);
-			} 
+			$body = http_build_query($body);
+			$response = wp_remote_post($url, array(
+				'body' => $body,
+				'timeout' => 15,
+				'headers' => array(
+					'Content-Type' => 'application/x-www-form-urlencoded',
+				),
+			));
+
+			if (is_wp_error($response)) {
+				return false;
+			}
+
+			return wp_remote_retrieve_body($response);
 		}
 
 		public function get_params_via_api($params_key, $apiurl) {
@@ -164,7 +156,7 @@ if (!class_exists('BVCallbackRequest')) :
 
 					if (array_key_exists('sersafe', $in_params)) {
 						$key = $in_params['sersafe'];
-						$in_params[$key] = BVCallbackRequest::serialization_safe_decode($in_params[$key]);
+						$in_params[$key] = MCCallbackRequest::serialization_safe_decode($in_params[$key]);
 					}
 
 					if (array_key_exists('bvprms', $in_params) && isset($in_params['bvprms'])) {
@@ -186,6 +178,7 @@ if (!class_exists('BVCallbackRequest')) :
 
 					if (array_key_exists('memset', $in_params)) {
 						$val = intval($in_params['memset']);
+						// phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for memory limit adjustment
 						@ini_set('memory_limit', $val.'M');
 					}
 
@@ -213,7 +206,7 @@ if (!class_exists('BVCallbackRequest')) :
 
 		public static function serialization_safe_decode($data) {
 			if (is_array($data)) {
-				$data = array_map(array('BVCallbackRequest', 'serialization_safe_decode'), $data);
+				$data = array_map(array('MCCallbackRequest', 'serialization_safe_decode'), $data);
 			} elseif (is_string($data)) {
 				$data = base64_decode($data);
 			}
@@ -247,23 +240,27 @@ if (!class_exists('BVCallbackRequest')) :
 				return false;
 			}
 
-			$key_file = dirname( __FILE__ ) . '/../public_keys/' . $this->pubkey_name . '.pub';
+			$openssl_algo = array_key_exists($sighshalgo, self::$SIG_HASH_ALGO_MAP) ? self::$SIG_HASH_ALGO_MAP[$sighshalgo] : null;
+			if ($openssl_algo === null) {
+				$this->error["message"] = "UNSUPPORTED_HASH_ALGORITHM: " . $sighshalgo;
+				return false;
+			}
+
+			$key_file = dirname( __DIR__ ) . '/public_keys/' . $this->pubkey_name . '.pub';
 			if (!file_exists($key_file)) {
 				$this->error["message"] = "PUBLIC_KEY_NOT_FOUND";
 				return false;
 			}
-			$public_key_str = file_get_contents($key_file);
+
+			$public_key_str = MCWPFileSystem::getInstance()->getContents($key_file);
+
 			$public_key = openssl_pkey_get_public($public_key_str);
 			if (!$public_key) {
 				$this->error["message"] = "UNABLE_TO_LOAD_PUBLIC_KEY";
 				return false;
 			}
 
-			if ($sighshalgo === 'sha256') {
-				$verify = openssl_verify($data, $sig, $public_key, OPENSSL_ALGO_SHA256);
-			} else {
-				$verify = openssl_verify($data, $sig, $public_key);
-			}
+			$verify = openssl_verify($data, $sig, $public_key, $openssl_algo);
 			if ($verify === 1) {
 				return true;
 			} elseif ($verify === 0) {
@@ -296,6 +293,7 @@ if (!class_exists('BVCallbackRequest')) :
 				"bvinfo" => $bvinfo->info(),
 				"statusmsg" => "FAILED_AUTH",
 				"api_pubkey" => substr($api_public_key, 0, 8),
+				"def_key_status" => MCRecover::getSecretStatus($this->settings),
 				"def_sigmatch" => substr(hash('sha1', $this->method.$default_secret.$this->time.$this->version), 0, 8)
 			);
 

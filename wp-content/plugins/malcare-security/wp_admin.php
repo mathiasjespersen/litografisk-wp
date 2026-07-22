@@ -3,6 +3,7 @@
 if (!defined('ABSPATH')) exit;
 if (!class_exists('MCWPAdmin')) :
 class MCWPAdmin {
+	public static $deactivation_assets_option = 'bv_mc_deactivation_assets';
 	public $settings;
 	public $siteinfo;
 	public $account;
@@ -25,41 +26,26 @@ class MCWPAdmin {
 	}
 
 	public function removeAdminNotices() {
-		if (array_key_exists('page', $_REQUEST) && $_REQUEST['page'] == $this->bvinfo->plugname) {
+		if (MCHelper::getRawParam('REQUEST', 'page') === $this->bvinfo->plugname) {
 			remove_all_actions('admin_notices');
 			remove_all_actions('all_admin_notices');
 		}
 	}
 
-	public function cwBrandInfo() {
-		return array(
-			'name' => "Bot Protection",
-			'title' => "Wordpress Security",
-			'description' => "WordPress Security, Bot Protection",
-			'authoruri' => "https://www.malcare.com",
-			'author' => "MalCare Security",
-			'authorname' => "Malcare Security",
-			'pluginuri' => "https://www.malcare.com",
-			'menuname' => "Bot Protection",
-			'brand_icon' => "/img/cw_icon.png"
-		);
-	}
-
 	public function initHandler() {
 		if (!current_user_can('activate_plugins'))
 			return;
+		$bvnonce = MCHelper::getRawParam('REQUEST', 'bvnonce');
+		$blogvaultkey = MCHelper::getRawParam('REQUEST', 'blogvaultkey');
+		$blogvaultkey = $blogvaultkey ? MCAccount::sanitizeKey($blogvaultkey) : "";
 
-		if (array_key_exists('bvnonce', $_REQUEST) &&
-				wp_verify_nonce($_REQUEST['bvnonce'], "bvnonce") &&
-				array_key_exists('blogvaultkey', $_REQUEST) &&
-				(strlen(MCAccount::sanitizeKey($_REQUEST['blogvaultkey'])) == 64) &&
-				(array_key_exists('page', $_REQUEST) &&
-				$_REQUEST['page'] == $this->bvinfo->plugname)) {
-			$keys = str_split($_REQUEST['blogvaultkey'], 32);
-			$pubkey = $keys[0];
+		if ($bvnonce && wp_verify_nonce($bvnonce, "bvnonce") &&
+				$blogvaultkey && strlen($blogvaultkey) == 64 &&
+				(MCHelper::getRawParam('REQUEST', 'page') === $this->bvinfo->plugname)) {
+			$keys = str_split($blogvaultkey, 32);
 			MCAccount::addAccount($this->settings, $keys[0], $keys[1]);
-			if (array_key_exists('redirect', $_REQUEST)) {
-				$location = $_REQUEST['redirect'];
+			$pubkey = $keys[0];
+			if (array_key_exists($_REQUEST, 'redirect')) {
 				$this->account = MCAccount::find($this->settings, $pubkey);
 				wp_redirect($this->account->authenticatedUrl('/malcare/access/welcome'));
 				exit();
@@ -68,15 +54,65 @@ class MCWPAdmin {
 		if ($this->bvinfo->isActivateRedirectSet()) {
 			$this->settings->updateOption($this->bvinfo->plug_redirect, 'no');
 			##ACTIVATEREDIRECTCODE##
-			wp_redirect($this->mainUrl());
+			if (!wp_doing_ajax()) {
+				wp_redirect($this->mainUrl());
+			}
 		}
+	}
+
+	public function handleDismissWSKBanner() {
+		$user_id = get_current_user_id();
+		$wpnonce = MCHelper::getRawParam('POST', '_wpnonce');
+		$dismiss_wsk_banner = MCHelper::getRawParam('POST', 'dismiss_wsk_banner');
+		if (MCHelper::getRawParam('SERVER', 'REQUEST_METHOD') === 'POST' &&
+				isset($dismiss_wsk_banner) &&
+				isset($wpnonce) && wp_verify_nonce($wpnonce, 'dismiss_wsk_banner')) {
+			update_user_meta($user_id, 'wsk_banner_dismissed', true);
+		}
+	}
+
+	public function canShowWSKBanner() {
+		if (!MCAccount::isConfigured($this->settings)) {
+			global $bvWebspacekitBannerShown;
+
+			if (!$bvWebspacekitBannerShown) {
+				$bvWebspacekitBannerShown = true;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public function initializeWSKBanner() {
+		if ($this->siteinfo->isWSKHosted()) {
+			$this->handleDismissWSKBanner();
+			$bannerDismissed = get_user_meta(get_current_user_id(), 'wsk_banner_dismissed', true);
+			if (!$bannerDismissed || (MCHelper::getRawParam('REQUEST', 'page') === $this->bvinfo->plugname)) {
+				if ($this->canShowWSKBanner()) {
+					add_action('admin_enqueue_scripts', function () {
+						wp_enqueue_style('wsk-fonts',
+								'https://fonts.googleapis.com/css2?family=Karla&family=Montserrat:wght@400;500;600;700&display=block',
+								array(), $this->bvinfo->version);
+						wp_enqueue_style('wsk-stylesheet', plugins_url('css/webspacekit_banner.min.css', __FILE__), array(), $this->bvinfo->version);
+					});
+					add_action('in_admin_header', function () {
+						add_action('all_admin_notices', [$this, 'loadWSKBanner']);
+					}, 9999);
+				}
+			}
+		}
+	}
+
+	public function loadWSKBanner() {
+		require_once dirname( __FILE__ ) . "/admin/components/webspacekit_banner.php";
 	}
 
 	public function mcsecAdminMenu($hook) {
 		if ($hook === 'toplevel_page_malcare' || MCHelper::safePregMatch("/bv_add_account$/", $hook) ||
 				MCHelper::safePregMatch("/bv_account_details$/", $hook)) {
-			wp_enqueue_style( 'bootstrap', plugins_url('css/bootstrap.min.css', __FILE__));
-			wp_enqueue_style( 'bvplugin', plugins_url('css/bvplugin.min.css', __FILE__));
+			wp_enqueue_style('bootstrap', plugins_url('css/bootstrap.min.css', __FILE__), array(), $this->bvinfo->version);
+			wp_enqueue_style('bvplugin', plugins_url('css/bvplugin.min.css', __FILE__), array(), $this->bvinfo->version);
+			wp_enqueue_script('mc-connection-key', plugins_url('js/connection-key.js', __FILE__), array(), $this->bvinfo->version, true);
 		}
 	}
 
@@ -87,7 +123,9 @@ class MCWPAdmin {
 			array($this, 'showAccountDetailsPage'));
 
 		$brand = $this->bvinfo->getPluginWhitelabelInfo();
-		if (!$this->bvinfo->canSetCWBranding() && (!is_array($brand) || (!array_key_exists('hide', $brand) && !array_key_exists('hide_from_menu', $brand)))) {
+		$can_whitelabel = $this->bvinfo->canWhiteLabel();
+		$hide_from_menu = is_array($brand) && (array_key_exists('hide', $brand) || array_key_exists('hide_from_menu', $brand));
+		if (!$can_whitelabel || !$hide_from_menu) {
 			$bname = $this->bvinfo->getBrandName();
 			$icon = $this->bvinfo->getBrandIcon();
 
@@ -123,7 +161,8 @@ class MCWPAdmin {
 		$whitelabel_info = $this->bvinfo->getPluginWhitelabelInfo($slug);
 		if (array_key_exists('hide_plugin_details', $whitelabel_info)) {
 			foreach ($plugin_metas as $pluginKey => $pluginValue) {
-				if (strpos($pluginValue, sprintf('>%s<', translate('View details')))) {
+				// phpcs:ignore WordPress.WP.I18n.MissingArgDomain
+				if (strpos($pluginValue, sprintf('>%s<', __('View details')))) {
 					unset($plugin_metas[$pluginKey]);
 					break;
 				}
@@ -166,14 +205,13 @@ class MCWPAdmin {
 	public function settingsLink($links, $file) {
 		#XNOTE: Fix this
 		if ( $file == plugin_basename( dirname(__FILE__).'/malcare.php' ) ) {
-			if (!$this->bvinfo->canSetCWBranding()) {
-				$brand = $this->bvinfo->getPluginWhitelabelInfo();
-				if (!is_array($brand) || !array_key_exists('hide_from_menu', $brand)) {
-					$settings_link = '<a href="'.$this->mainUrl().'">'.__( 'Settings' ).'</a>';
-					array_unshift($links, $settings_link);
-					$account_details = '<a href="'.$this->mainUrl('&account_details=true').'">'.__( 'Account Details' ).'</a>';
-					array_unshift($links, $account_details);
-				}
+			$brand = $this->bvinfo->getPluginWhitelabelInfo();
+			if (!is_array($brand) || !array_key_exists('hide_from_menu', $brand)) {
+				// phpcs:ignore WordPress.WP.I18n.MissingArgDomain
+				$settings_link = '<a href="'.$this->mainUrl().'">'.__('Settings').'</a>';
+				array_unshift($links, $settings_link);
+				$account_details = '<a href="'.$this->mainUrl('&account_details=true').'">'.'Account Details'.'</a>';
+				array_unshift($links, $account_details);
 			}
 		}
 		return $links;
@@ -200,6 +238,7 @@ class MCWPAdmin {
 		$bvnonce = wp_create_nonce("bvnonce");
 		$public = MCAccount::getApiPublicKey($this->settings);
 		$secret = MCRecover::defaultSecret($this->settings);
+		$server_ip = MCHelper::getStringParamEscaped('SERVER', 'SERVER_ADDR', 'attr');
 		$tags = "<input type='hidden' name='url' value='".esc_attr($this->siteinfo->wpurl())."'/>\n".
 				"<input type='hidden' name='homeurl' value='".esc_attr($this->siteinfo->homeurl())."'/>\n".
 				"<input type='hidden' name='siteurl' value='".esc_attr($this->siteinfo->siteurl())."'/>\n".
@@ -207,7 +246,7 @@ class MCWPAdmin {
 				"<input type='hidden' name='plug' value='".esc_attr($this->bvinfo->plugname)."'/>\n".
 				"<input type='hidden' name='adminurl' value='".esc_attr($this->mainUrl())."'/>\n".
 				"<input type='hidden' name='bvversion' value='".esc_attr($this->bvinfo->version)."'/>\n".
-	 			"<input type='hidden' name='serverip' value='".esc_attr($_SERVER["SERVER_ADDR"])."'/>\n".
+				"<input type='hidden' name='serverip' value='".$server_ip."'/>\n".
 				"<input type='hidden' name='abspath' value='".esc_attr(ABSPATH)."'/>\n".
 				"<input type='hidden' name='secret' value='".esc_attr($secret)."'/>\n".
 				"<input type='hidden' name='public' value='".esc_attr($public)."'/>\n".
@@ -227,6 +266,64 @@ class MCWPAdmin {
 		}
 	}
 
+	public function enqueue_deactivation_feedback_assets($hook) {
+		if ($hook != 'plugins.php') {
+			return;
+		}
+
+		$serialized_assets = $this->settings->getOption(self::$deactivation_assets_option);
+		if (empty($serialized_assets)) {
+			return;
+		}
+
+		$assets = maybe_unserialize($serialized_assets);
+		if ($assets === false || !is_array($assets)) {
+			return;
+		}
+
+		$script_handle = 'mc-deactivation-feedback';
+
+		// Register the script
+		if (!wp_register_script($script_handle, false, array('jquery'), '1.0', true)) {
+			return;
+		}
+
+		// Localize the script
+		$localization_success = wp_localize_script($script_handle, 'mcDeactivationVars', array(
+			'pluginSlug' => $this->bvinfo->slug,
+		));
+
+		// Enqueue the script only if localization was successful
+		if ($localization_success) {
+			wp_enqueue_script($script_handle);
+		} else {
+			// If localization fails, deregister the script to clean up
+			wp_deregister_script($script_handle);
+			return;
+		}
+
+		if (!empty($assets['js']) && !empty($assets['css'])) {
+			// Attempt to decode both
+			$js_content = base64_decode($assets['js']);
+			$css_content = base64_decode($assets['css']);
+
+			// Check if both were successfully decoded
+			if ($js_content !== false && $css_content !== false) {
+				// Enqueue JS
+				wp_add_inline_script($script_handle, $js_content, 'after');
+
+				// Enqueue CSS
+				wp_add_inline_style('wp-admin', $css_content);
+			}
+		}
+	}
+
+	public function add_deactivation_feedback_dialog() {
+		?>
+		<div id="mc-deactivation-feedback-container"></div>
+		<?php
+	}
+
 	public function showAddAccountPage() {
 		require_once dirname( __FILE__ ) . "/admin/add_new_account.php";
 	}
@@ -240,14 +337,19 @@ class MCWPAdmin {
 	}
 
 	public function adminPage() {
-		if (isset($_REQUEST['bvnonce']) && wp_verify_nonce( $_REQUEST['bvnonce'], 'bvnonce' )) {
+		$bvnonce = MCHelper::getRawParam('REQUEST', 'bvnonce');
+		if ($bvnonce && wp_verify_nonce($bvnonce, 'bvnonce')) {
 			$info = array();
 			$this->siteinfo->basic($info);
-			$this->bvapi->pingbv('/bvapi/disconnect', $info, MCAccount::sanitizeKey($_REQUEST['pubkey']));
-			MCAccount::remove($this->settings, MCAccount::sanitizeKey($_REQUEST['pubkey']));
-		}
 
-		if (isset($_REQUEST['account_details'])) {
+			$pubkey = MCHelper::getRawParam('REQUEST', 'pubkey');
+			if (!empty($pubkey)) {
+				$pubkey = MCAccount::sanitizeKey($pubkey);
+				$this->bvapi->pingbv('/bvapi/disconnect', $info, $pubkey);
+				MCAccount::remove($this->settings, $pubkey);
+			}
+		}
+			if (isset($_REQUEST['account_details'])) {
 			$this->showAccountDetailsPage();
 		} else if (isset($_REQUEST['add_account'])) {
 			$this->showAddAccountPage();
@@ -263,9 +365,6 @@ class MCWPAdmin {
 			return $plugins;
 		}
 		$whitelabel_infos = $this->bvinfo->getPluginsWhitelabelInfos();
-		if ($this->bvinfo->canSetCWBranding()) {
-			$whitelabel_infos[$this->bvinfo->slug] = $this->cwBrandInfo();
-		}
 
 		foreach ($whitelabel_infos as $slug => $brand) {
 			if (!isset($slug) || !$this->bvinfo->canWhiteLabel($slug) || !array_key_exists($slug, $plugins) || !is_array($brand)) {

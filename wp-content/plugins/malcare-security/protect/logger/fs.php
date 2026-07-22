@@ -1,8 +1,8 @@
 <?php
 if (!defined('ABSPATH') && !defined('MCDATAPATH')) exit;
 
-if (!class_exists('MCProtectLoggerFS_V547')) :
-class MCProtectLoggerFS_V547 {
+if (!class_exists('MCProtectLoggerFS_V648')) :
+class MCProtectLoggerFS_V648 {
 	public $logFile;
 
 	function __construct($filename) {
@@ -13,6 +13,7 @@ class MCProtectLoggerFS_V547 {
 		$_data = serialize($data);
 		$str = "bvlogbvlogbvlog" . ":";
 		$str .= strlen($_data) . ":" . $_data;
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- logging required
 		error_log($str, 3, $this->logFile);
 	}
 }

@@ -30,26 +30,31 @@ if ( is_multisite() ) {
 ?>
 <section>
 	<?php if ( true === $is_custom ) { ?>
-		<div class="br-overlay-disable"><?php _e( 'Settings are inherited', 'breeze' ); ?></div>
+		<div class="br-overlay-disable"><?php esc_html_e( 'Settings are inherited', 'breeze' ); ?></div>
 	<?php } ?>
+
+    <?php
+    Breeze_One_Click_Optimization::one_click_optimization_notice();
+    ?>
+
 	<div class="br-section-title">
-		<img src="<?php echo $icon; ?>"/>
-		<?php _e( 'TOOLS', 'breeze' ); ?>
+		<img src="<?php echo esc_url( $icon ); ?>"/>
+		<?php esc_html_e( 'TOOLS', 'breeze' ); ?>
 	</div>
 
 	<!-- START OPTION -->
 	<div class="br-option-item">
 		<div class="br-label">
 			<div class="br-option-text">
-				<?php _e( 'Export Settings', 'breeze' ); ?>
+				<?php esc_html_e( 'Export Settings', 'breeze' ); ?>
 			</div>
 		</div>
 		<div class="br-option">
-			<input type="button" name="breeze_export_settings" id="breeze_export_settings" class="br-blue-button" value="<?php _e( 'Download Settings', 'breeze' ); ?>">
+			<input type="button" name="breeze_export_settings" id="breeze_export_settings" class="br-blue-button" value="<?php esc_attr_e( 'Download Settings', 'breeze' ); ?>">
 			<input type="hidden" id="breeze-level" value="<?php echo esc_attr( $level ); ?>">
 			<div class="br-note">
 				<p style="font-weight: bold">
-					<?php _e( 'Download a backup file of your settings', 'breeze' ); ?>
+					<?php esc_html_e( 'Download a backup file of your settings', 'breeze' ); ?>
 				</p>
 			</div>
 		</div>
@@ -60,18 +65,18 @@ if ( is_multisite() ) {
 	<div class="br-option-item">
 		<div class="br-label">
 			<div class="br-option-text">
-				<?php _e( 'Import Settings:', 'breeze' ); ?>
+				<?php esc_html_e( 'Import Settings:', 'breeze' ); ?>
 			</div>
 		</div>
 		<div class="br-option">
 			<div class="br-input-container">
 			<div class="br-input-item">
-                <label for="breeze_import_settings" class="br-label-for-file">
+				<label for="breeze_import_settings" class="br-label-for-file">
 				<input type="file" name="breeze_import_settings" id="breeze_import_settings">
-                </label>
+				</label>
 			</div>
 			<div class="br-input-item">
-				<div class="br-file-text"><?php _e( 'No File Chosen', 'breeze' ); ?></div>
+				<div class="br-file-text"><?php esc_html_e( 'No File Chosen', 'breeze' ); ?></div>
 			</div>
 			</div>
 
@@ -82,16 +87,73 @@ if ( is_multisite() ) {
 					$size  = size_format( $bytes );
 
 					/* translators: Upload size */
-					echo wp_sprintf( __( 'Choose a JSON file from your computer (maximum size: %s)', 'breeze' ), $size );
+					echo esc_html( wp_sprintf( __( 'Choose a JSON file from your computer (maximum size: %s)', 'breeze' ), esc_html( $size ) ) );
 					?>
 				</p>
 				<p id="file-selected"></p>
 				<p id="file-error" class="file_red br-notice" style="font-weight: bold"></p>
 			</div>
 
-			<input type="button" id="breeze_import_btn" value="<?php _e( 'Upload File and Import Settings', 'breeze' ); ?>" class="br-blue-button" disabled/>
+			<input type="button" id="breeze_import_btn" value="<?php esc_attr_e( 'Upload File and Import Settings', 'breeze' ); ?>" class="br-blue-button" disabled/>
 			<div class="br-space"></div>
 		</div>
 	</div>
 	<!-- END OPTION -->
+
+    <!--  START OPTION  -->
+    <div class="br-option-item">
+        <div class="br-label">
+            <div class="br-option-text">
+                <?php esc_html_e( 'Reset all settings', 'breeze' ); ?>
+            </div>
+        </div>
+        <div class="br-option">
+            <input type="button" name="breeze_reset_default" id="breeze_reset_default" class="br-blue-button" value="<?php esc_attr_e( 'Reset Now', 'breeze' ); ?>">
+            <input type="hidden" id="breeze-level" value="<?php echo esc_attr( $level ); ?>">
+
+            <div class="br-note">
+                <p style="font-weight: bold">
+                </p>
+            </div>
+        </div>
+    </div>
+    <!--  END OPTION    -->
+	
+	<!--  START OPTION  -->
+    <div class="br-option-item">
+        <div class="br-label">
+            <div class="br-option-text">
+                <?php esc_html_e( 'Rollback Version', 'breeze' ); ?>
+            </div>
+        </div>
+        <div class="br-option br-rollback-option">
+			<?php 
+				// Base rollback URL
+				$breeze_rollback_url = is_network_admin() ? network_admin_url( 'index.php' ) : admin_url( 'index.php' );
+			?>
+			<form name="breeze_rollback_form" id="breeze_rollback_form" action="<?php echo esc_url( $breeze_rollback_url ); ?>">
+				<input type="hidden" name="page" value="breeze-rollback">
+				<?php wp_nonce_field( 'breeze_rollback_nonce' ); ?>
+				<input type="hidden" name="installed_version" value="<?php echo esc_attr( BREEZE_VERSION ); ?>">
+				<select name="breeze_version" class="breeze-version">
+					<?php
+					$versions = breeze_org_versions();
+					foreach ( $versions as $version ) {
+						$selected = '';
+						if ( BREEZE_VERSION === $version ) {
+							$selected = 'selected';
+						}
+						echo '<option value="' . esc_attr( $version ) . '" ' . esc_attr( $selected ) . '>' . esc_html( $version ) . '</option>';
+					}
+					?>
+				</select>
+				<input type="submit" class="br-blue-button rollback-button" value="Rollback">
+			</form>
+			<div class="just-here-to-add-padding">
+				<p>
+				</p>
+        	</div>
+        </div>
+    </div>
+    <!--  END OPTION    -->
 </section>

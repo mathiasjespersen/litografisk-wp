@@ -10,6 +10,8 @@
 
 namespace Smush\Core\Api;
 
+use Smush\Core\Array_Utils;
+use Smush\Core\Configs;
 use Smush\Core\Settings;
 use WP_Smush;
 
@@ -35,11 +37,18 @@ class Hub {
 	);
 
 	/**
+	 * @var Array_Utils
+	 */
+	private $array_utils;
+
+	/**
 	 * Hub constructor.
 	 *
 	 * @since 3.7.0
 	 */
 	public function __construct() {
+		$this->array_utils = new Array_Utils();
+
 		add_filter( 'wdp_register_hub_action', array( $this, 'add_endpoints' ) );
 	}
 
@@ -50,7 +59,6 @@ class Hub {
 	 *
 	 * @since 3.7.0
 	 * @param array $actions  Endpoint action.
-	 *
 	 * @return array
 	 */
 	public function add_endpoints( $actions ) {
@@ -73,30 +81,49 @@ class Hub {
 		$core     = WP_Smush::get_instance()->core();
 		$settings = Settings::get_instance();
 
-		$status['cdn']   = $core->mod->cdn->is_active();
-		$status['super'] = $settings->get( 'lossy' );
+		$status['cdn']   = $settings->is_cdn_active();
+		$status['lossy'] = $settings->get_lossy_level_setting();
 
 		$lazy = $settings->get_setting( 'wp-smush-lazy_load' );
 
 		$status['lazy'] = array(
-			'enabled' => $core->mod->lazy->is_active(),
+			'enabled' => Settings::get_instance()->is_lazyload_active(),
 			'native'  => is_array( $lazy ) && isset( $lazy['native'] ) ? $lazy['native'] : false,
 		);
 
-		if ( ! isset( $core->stats ) ) {
-			// Setup stats, if not set already.
-			$core->setup_global_stats();
-		}
+		$global_stats = $core->get_global_stats();
 		// Total, Smushed, Unsmushed, Savings.
-		$status['count_total']   = $core->total_count;
-		$status['count_smushed'] = $core->smushed_count;
+		$status['count_total']   = $this->array_utils->get_array_value( $global_stats, 'count_total' );
+		$status['count_smushed'] = $this->array_utils->get_array_value( $global_stats, 'count_smushed' );
 		// Considering the images to be resmushed.
-		$status['count_unsmushed'] = $core->remaining_count;
-		$status['savings']         = $core->stats;
+		$status['count_unsmushed'] = $this->array_utils->get_array_value( $global_stats, 'count_unsmushed' );
+		$status['savings']         = $this->get_savings_stats( $global_stats );
 
-		$status['dir'] = $core->dir_stats;
+		$status['dir'] = $this->array_utils->get_array_value( $global_stats, 'savings_dir_smush' );
 
 		wp_send_json_success( (object) $status );
+	}
+
+	private function get_savings_stats( $global_stats ) {
+		// TODO: Is better to update the new change on hub?
+		$map_stats_keys = array(
+			'size_before'        => 'size_before',
+			'size_after'         => 'size_after',
+			'percent'            => 'savings_percent',
+			'human'              => 'human_bytes',
+			'bytes'              => 'savings_bytes',
+			'total_images'       => 'count_images',
+			'resize_count'       => 'count_resize',
+			'resize_savings'     => 'savings_resize',
+			'conversion_savings' => 'savings_conversion',
+		);
+
+		$hub_savings_stats = array();
+		foreach ( $map_stats_keys as $hub_key => $global_stats_key ) {
+			$hub_savings_stats[ $hub_key ] = $this->array_utils->get_array_value( $global_stats, $global_stats_key );
+		}
+
+		return $hub_savings_stats;
 	}
 
 	/**
@@ -118,7 +145,7 @@ class Hub {
 		// The Hub returns an object, we use an array.
 		$config_array = json_decode( wp_json_encode( $config_data->configs ), true );
 
-		$configs_handler = new \Smush\Core\Configs();
+		$configs_handler = Configs::get_instance();
 		$configs_handler->apply_config( $config_array );
 
 		wp_send_json_success();
@@ -130,7 +157,7 @@ class Hub {
 	 * @since 3.8.5
 	 */
 	public function action_export_settings() {
-		$configs_handler = new \Smush\Core\Configs();
+		$configs_handler = Configs::get_instance();
 		$config          = $configs_handler->get_config_from_current();
 
 		wp_send_json_success( $config['config'] );

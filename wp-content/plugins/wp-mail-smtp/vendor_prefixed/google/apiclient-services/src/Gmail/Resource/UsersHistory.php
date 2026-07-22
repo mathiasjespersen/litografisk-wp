@@ -23,7 +23,7 @@ use WPMailSMTP\Vendor\Google\Service\Gmail\ListHistoryResponse;
  * Typical usage is:
  *  <code>
  *   $gmailService = new Google\Service\Gmail(...);
- *   $history = $gmailService->history;
+ *   $history = $gmailService->users_history;
  *  </code>
  */
 class UsersHistory extends \WPMailSMTP\Vendor\Google\Service\Resource
@@ -55,13 +55,14 @@ class UsersHistory extends \WPMailSMTP\Vendor\Google\Service\Resource
      * response, there are no updates to retrieve and you can store the returned
      * `historyId` for a future request.
      * @return ListHistoryResponse
+     * @throws \Google\Service\Exception
      */
     public function listUsersHistory($userId, $optParams = [])
     {
         $params = ['userId' => $userId];
         $params = \array_merge($params, $optParams);
-        return $this->call('list', [$params], \WPMailSMTP\Vendor\Google\Service\Gmail\ListHistoryResponse::class);
+        return $this->call('list', [$params], ListHistoryResponse::class);
     }
 }
 // Adding a class alias for backwards compatibility with the previous class name.
-\class_alias(\WPMailSMTP\Vendor\Google\Service\Gmail\Resource\UsersHistory::class, 'WPMailSMTP\\Vendor\\Google_Service_Gmail_Resource_UsersHistory');
+\class_alias(UsersHistory::class, 'WPMailSMTP\\Vendor\\Google_Service_Gmail_Resource_UsersHistory');

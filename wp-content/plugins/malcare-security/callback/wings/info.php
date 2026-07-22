@@ -1,16 +1,16 @@
 <?php
 
 if (!defined('ABSPATH')) exit;
-if (!class_exists('BVInfoCallback')) :
+if (!class_exists('MCInfoCallback')) :
 
-class BVInfoCallback extends BVCallbackBase {
+class MCInfoCallback extends MCCallbackBase {
 	public $db;
 	public $settings;
 	public $siteinfo;
 	public $bvinfo;
 	public $bvapi;
 	
-	const INFO_WING_VERSION = 2.0;
+	const INFO_WING_VERSION = 2.7;
 
 	public function __construct($callback_handler) {
 		$this->db = $callback_handler->db;
@@ -76,7 +76,11 @@ class BVInfoCallback extends BVCallbackBase {
 				'title' => $plugin_data['Title'],
 				'version' => $plugin_data['Version'],
 				'active' => is_plugin_active($plugin_file),
-				'network' => $plugin_data['Network']
+				'network' => $plugin_data['Network'],
+				"plugin_uri" => $plugin_data["PluginURI"],
+				"update_uri" => $plugin_data["UpdateURI"],
+				"author_uri" => $plugin_data["AuthorURI"],
+				"author" => $plugin_data["AuthorName"],
 			);
 			$pdata = $this->addDBInfoToPlugin($pdata, $plugin_file);
 			$result["plugins"][] = $pdata;
@@ -91,7 +95,11 @@ class BVInfoCallback extends BVCallbackBase {
 				'title' => $theme->Title,
 				'stylesheet' => $theme->get_stylesheet(),
 				'template' => $theme->Template,
-				'version' => $theme->Version
+				'version' => $theme->Version,
+				'theme_uri' => $theme->get('ThemeURI'),
+				'author' => $theme->get('Author'),
+				'author_uri' => $theme->get('AuthorURI'),
+				'update_uri' => $theme->get('UpdateURI'),
 			);
 		} else {
 			$pdata = array(
@@ -99,7 +107,9 @@ class BVInfoCallback extends BVCallbackBase {
 				'title' => $theme["Title"],
 				'stylesheet' => $theme["Stylesheet"],
 				'template' => $theme["Template"],
-				'version' => $theme["Version"]
+				'version' => $theme["Version"],
+				'author' => $theme['Author'],
+				'author_uri' => $theme['Author URI'],
 			);
 		}
 		return $pdata;
@@ -107,25 +117,24 @@ class BVInfoCallback extends BVCallbackBase {
 
 	public function getThemes() {
 		$result = array();
-		$themes = function_exists('wp_get_themes') ? wp_get_themes() : get_themes();
+		$themes = wp_get_themes();
 		foreach($themes as $theme) {
 			$pdata = $this->themeToArray($theme);
 			$result["themes"][] = $pdata;
 		}
-		$theme = function_exists('wp_get_theme') ? wp_get_theme() : get_current_theme();
-		$pdata = $this->themeToArray($theme);
+		$pdata = $this->themeToArray(wp_get_theme());
 		$result["currenttheme"] = $pdata;
 		return $result;
 	}
 
 	public function getSystemInfo() {
 		$sys_info = array(
-			'host' => $_SERVER['HTTP_HOST'],
+			'host' => MCHelper::getRawParam('SERVER', 'HTTP_HOST'),
 			'phpversion' => phpversion(),
 			'AF_INET6' => defined('AF_INET6')
 		);
 		if (array_key_exists('SERVER_ADDR', $_SERVER)) {
-			$sys_info['serverip'] = $_SERVER['SERVER_ADDR'];
+			$sys_info['serverip'] = MCHelper::getRawParam('SERVER', 'SERVER_ADDR');
 		}
 		if (function_exists('get_current_user')) {
 			$sys_info['user'] = get_current_user();
@@ -168,6 +177,8 @@ class BVInfoCallback extends BVCallbackBase {
 			'contentdir' => defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : null,
 			'contenturl' => defined('WP_CONTENT_URL') ? WP_CONTENT_URL : null,
 			'plugindir' => defined('WP_PLUGIN_DIR') ? WP_PLUGIN_DIR : null,
+			'themedir' => get_stylesheet_directory(),
+			'templatedir' => get_template_directory(),
 			'dbcharset' => defined('DB_CHARSET') ? DB_CHARSET : null,
 			'disallow_file_edit' => defined('DISALLOW_FILE_EDIT'),
 			'disallow_file_mods' => defined('DISALLOW_FILE_MODS'),
@@ -175,7 +186,9 @@ class BVInfoCallback extends BVCallbackBase {
 			'custom_usermeta' => defined('CUSTOM_USERMETA_TABLE') ? CUSTOM_USERMETA_TABLE : null,
 			'locale' => get_locale(),
 			'wp_local_string' => $wp_local_package,
-			'charset_collate' => $db->getCharsetCollate()
+			'charset_collate' => $db->getCharsetCollate(),
+			'allowed_paths' => ini_get('open_basedir'),
+			'path_seprator' => PATH_SEPARATOR
 		);
 		return $wp_info;
 	}
@@ -215,6 +228,12 @@ class BVInfoCallback extends BVCallbackBase {
 		}
 		if (function_exists('openssl_public_decrypt')) {
 			$info['openssl_public_decrypt'] = "1";
+		}
+		if (function_exists('openssl_encrypt')) {
+			$info['openssl_encrypt'] = "1";
+		}
+		if (function_exists('openssl_decrypt')) {
+			$info['openssl_decrypt'] = "1";
 		}
 		$info['sha1'] = "1";
 		$info['apissl'] = "1";
@@ -264,7 +283,14 @@ class BVInfoCallback extends BVCallbackBase {
 
 	public function getHostInfo() {
 		$host_info = $_SERVER;
-		$host_info['PHP_SERVER_NAME'] = php_uname('\n');
+		if (function_exists('php_uname')) {
+			$host_info['PHP_SERVER_NAME'] = php_uname();
+		}
+
+		if (isset($_SERVER['SERVER_ADDR']) && function_exists('gethostbyaddr')) {
+			$host_info['HOST_FROM_IP'] = gethostbyaddr(MCHelper::getRawParam('SERVER', 'SERVER_ADDR'));
+		}
+
 		if (array_key_exists('IS_PRESSABLE', get_defined_constants())) {
 			$host_info['IS_PRESSABLE'] = true;
 		}
@@ -277,12 +303,16 @@ class BVInfoCallback extends BVCallbackBase {
 			$host_info['WPE_APIKEY'] = WPE_APIKEY;
 		}
 
+		if (defined('IS_ATOMIC')) {
+			$host_info['IS_ATOMIC'] = IS_ATOMIC;
+		}
+
 		return $host_info;
 	}
 
 	public function serverConfig() {
 		return array(
-			'software' => $_SERVER['SERVER_SOFTWARE'],
+			'software' => MCHelper::getRawParam('SERVER', 'SERVER_SOFTWARE'),
 			'sapi' => (function_exists('php_sapi_name')) ? php_sapi_name() : false,
 			'has_apache_get_modules' => function_exists('apache_get_modules'),
 			'posix_getuid' => (function_exists('posix_getuid')) ? posix_getuid() : null,
@@ -477,6 +507,29 @@ class BVInfoCallback extends BVCallbackBase {
 		return $result;
 	}
 
+	function getPluginFileData($plugin_file) {
+		$result = array();
+
+		if (!function_exists('get_plugin_data')) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+		$plugin_data = get_plugin_data(WP_PLUGIN_DIR . '/' . $plugin_file);
+		if ($plugin_data && isset($plugin_data['Version'])) {
+			$result['version'] = $plugin_data['Version'];
+		}
+
+		return $result;
+	}
+
+	function fetchPluginApiData($slug, $action) {
+		$args = array('slug' => wp_unslash($slug));
+		$args = (object) $args;
+		$args = apply_filters('plugins_api_args', $args, $action);
+		$data = apply_filters('plugins_api', false, $action, $args);
+
+		return $data; 
+	}
+
 	public function process($request) {
 		$db = $this->db;
 		$params = $request->params;
@@ -534,14 +587,20 @@ class BVInfoCallback extends BVCallbackBase {
 		case "gthost":
 			$resp = array('host_info' => $this->getHostInfo());
 			break;
+		case "gtplsinfo":
+			$resp = array("plugins_info" => array());
+			$file_by_slug = $params["file_by_slug"];
+			foreach ($params['slugs'] as $slug) {
+				$data = $this->fetchPluginApiData($slug, $params['action']);
+				if (is_object($data) && !property_exists($data, 'version') && isset($file_by_slug[$slug])) {
+					$plugin_data = $this->getPluginFileData($file_by_slug[$slug]);
+					$data->version = $plugin_data['version'];
+				}
+				$resp['plugins_info'][$slug] = $data;
+			}
+			break;
 		case "gtplinfo":
-			$args = array(
-				'slug' => wp_unslash($params['slug'])
-			);
-			$action = $params['action'];
-			$args = (object) $args;
-			$args = apply_filters('plugins_api_args', $args, $action);
-			$data = apply_filters('plugins_api', false, $action, $args);
+			$data = $this->fetchPluginApiData($params['slug'], $params['action']);
 			$resp = array("plugins_info" => $data);
 			break;
 		case "gtpostactinfo":
