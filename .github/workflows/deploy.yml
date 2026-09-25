@@ -1,0 +1,31 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy
+        run: |
+          echo "Deploying application..."
+
+      - name: Send webhook
+        if: success()
+        run: |
+          curl -X POST "https://phpstack-712079-6692859.cloudwaysapps.com/litografisk-autodeploy.php" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "event": "deployment.completed",
+              "repository": "${{ github.repository }}",
+              "branch": "${{ github.ref_name }}",
+              "commit": "${{ github.sha }}",
+              "actor": "${{ github.actor }}"
+            }'
